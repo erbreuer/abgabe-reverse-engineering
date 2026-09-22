@@ -14,7 +14,6 @@ public class Main {
     private static final byte[] _Mc = {0x39};
     private static final byte[] _Md = {0x3e};
     private static final byte[] _Me = {0x3f};
-    private static final byte[] _Mf = {0x3c};
 
     private static String _s(byte[] b) {
         byte[] r = new byte[b.length];
@@ -76,12 +75,10 @@ public class Main {
         Class<?> crypto = loader.loadClass(_s(_C));
 
         if (args[0].equals("--sample")) {
-            String msg      = (String) crypto.getMethod(_s(_Md)).invoke(null);
-            String mac      = (String) crypto.getMethod(_s(_Me)).invoke(null);
-            int    secretLen = (int)   crypto.getMethod(_s(_Mf)).invoke(null);
+            String msg = (String) crypto.getMethod(_s(_Md)).invoke(null);
+            String mac = (String) crypto.getMethod(_s(_Me)).invoke(null);
             System.out.println("Sample message : " + msg);
             System.out.println("Sample MAC     : " + mac);
-            System.out.println("Secret length  : " + secretLen);
             return;
         }
 
