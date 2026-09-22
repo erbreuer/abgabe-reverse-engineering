@@ -1,0 +1,3 @@
+SecureVault-RE integrity anchor v1
+artifact=de.dhbw.securevault:securevault-re
+main-class=de.dhbw.securevault.Main

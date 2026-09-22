@@ -1,0 +1,49 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>de.dhbw.securevault</groupId>
+  <artifactId>securevault-re</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+
+  <properties>
+    <maven.compiler.source>21</maven.compiler.source>
+    <maven.compiler.target>21</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <build>
+    <finalName>Anwendung</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.4.1</version>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>de.dhbw.securevault.Main</mainClass>
+            </manifest>
+          </archive>
+          <!-- The protected packages (keyparts, crypto, vault) must never
+               ship as plaintext .class files, only as the encrypted
+               vault/*.bin resources staged by scripts/build.sh. mvn package
+               re-runs the compile phase, which would otherwise re-populate
+               target/classes with their plaintext .class files. -->
+          <excludes>
+            <exclude>de/dhbw/securevault/keyparts/**</exclude>
+            <exclude>de/dhbw/securevault/crypto/**</exclude>
+            <exclude>de/dhbw/securevault/vault/**</exclude>
+          </excludes>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
