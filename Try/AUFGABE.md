@@ -12,14 +12,12 @@ VaultAccess ist ein Token-Validator. Du übergibst eine Nachricht und einen MAC
 ```bash
 java -jar vault.jar --help
 java -jar vault.jar --sample
-java -jar vault.jar <message-hex> <mac>
+java -jar vault.jar <message> <mac>
 ```
-
-Die Nachricht wird als **Hex-String** übergeben. `--sample` zeigt ein Beispiel.
 
 ## Dein Ziel
 
-Die Anwendung gibt ein Flag aus, wenn die übergebene Nachricht den Nutzer `admin`
+Die Anwendung gibt ein Flag aus, wenn die übergebene Nachricht die Rolle `admin`
 enthält **und** der MAC gültig ist.
 
 ```
@@ -37,4 +35,3 @@ funktionieren, da der MAC dann ungültig ist.
 
 Analysiere die Anwendung. Der MAC-Algorithmus hat eine Schwachstelle, die es
 erlaubt einen gültigen Token zu fälschen — ohne Brute-Force und ohne das Secret.
-Die Secret-Länge ist aus dem JAR ermittelbar.

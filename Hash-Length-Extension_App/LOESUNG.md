@@ -2,7 +2,7 @@
 
 ## Ziel
 
-Die Anwendung `vault.jar` prüft einen Token der Form `message + MAC`. Ziel ist es,
+Die Anwendung `vault.jar` prüft einen Token der Form `message-hex + MAC`. Ziel ist es,
 einen Token zu fälschen der `user=admin` enthält und von der Anwendung als gültig
 akzeptiert wird — **ohne das Secret zu kennen**.
 
@@ -11,17 +11,16 @@ akzeptiert wird — **ohne das Secret zu kennen**.
 ## Schritt 1: JAR erkunden
 
 ```bash
-java -jar vault.jar --sample
+VAULT_SECRET=s3cr3t\!X java -jar vault.jar --sample
 ```
 
 Ausgabe:
 ```
-Sample message : user=guest
-Sample MAC     : 24af60bad400dee40dee5745738a122f2af594f7680d1a63002043389f8c7a6b
-Secret length  : 8
+Sample message (hex) : 757365723d6775657374
+Sample MAC           : 24af60bad400dee40dee5745738a122f2af594f7680d1a63002043389f8c7a6b
 ```
 
-Die Anwendung gibt direkt einen gültigen Ausgangspunkt und die Secret-Länge.
+`757365723d6775657374` ist die Hex-Kodierung von `user=guest`.
 
 ```bash
 jar tf vault.jar
@@ -111,71 +110,89 @@ java -jar cfr.jar /tmp/Crypto.class
 Sichtbar im dekompilierten Code:
 
 ```java
-// SECRET "s3cr3t!X" XOR 0x42 — als byte-Array gespeichert
-private static final byte[] _S = {0x31,0x71,0x21,...};
+// Secret kommt aus der Umgebungsvariable VAULT_SECRET — nicht im JAR gespeichert
+private static final String _ENV = System.getenv("VAULT_SECRET");
 
-// SECRET_LENGTH = 8, verschleiert als Math.round(Math.log(Math.exp(8)))
-private static final int _L = (int) Math.round(Math.log(Math.exp(8)));
+// Secret-Länge verschleiert: Integer.rotateRight(Integer.rotateLeft(n, 3), 3) = n
+public static int f() { return Integer.rotateRight(Integer.rotateLeft(_secret().length, 3), 3); }
 
-// MAC-Berechnung:
-public static String a(String m) {
+// MAC-Berechnung: SHA256(secret_bytes || message_bytes)
+public static String a(byte[] m) {
     MessageDigest md = MessageDigest.getInstance("SHA-256");
-    byte[] input = (_x(_S) + m).getBytes("UTF-8");   // SHA256(secret || message)
+    byte[] hash = md.digest(concat(_secret(), m));
+    ...
+}
+
+// Rollen-Parsing: letztes "user="-Feld gewinnt
+public static String b(byte[] m) {
+    for (String p : new String(m, UTF_8).split("&")) {
+        if (p.startsWith("user=")) role = p.substring(5);
+    }
     ...
 }
 ```
 
-**Die Schwachstelle:** `SHA256(secret + message)` — `hash(secret || message)` statt HMAC.
+**Die Secret-Länge** ermitteln — `f()` per Reflection aufrufen:
+```python
+# Oder: aus dem Bytecode ablesen — Math.exp(X) wobei X die Länge ist
+# Bei s3cr3t!X: Länge = 8
+```
+
+**Die Schwachstelle:** `SHA256(secret || message)` statt HMAC.
 
 Dies ist anfällig für einen **Hash-Length-Extension-Angriff**: Wer den Hash von
 `secret || message` kennt, kennt den internen SHA-256-Zustand nach diesem Input und
 kann `|| extra` anhängen ohne das Secret zu kennen.
 
-Außerdem sichtbar: `extractRole()` (Methode `b`) gibt das **letzte** `user=`-Feld
-zurück. D.h. `user=guest[padding]&user=admin` → Rolle `admin`.
+Außerdem sichtbar: `extractUser()` (Methode `b`) gibt das **letzte** `user=`-Feld
+zurück. D.h. `user=guest[padding]&user=admin` → Nutzer `admin`.
 
 ---
 
 ## Schritt 5: Angriff ausführen
 
-### Voraussetzung
+### Option A — mit hlextend
 
 ```bash
 pip install hlextend
 ```
 
-### Script
-
 ```python
-import hlextend, binascii
+import hlextend
 
 known_mac     = "24af60bad400dee40dee5745738a122f2af594f7680d1a63002043389f8c7a6b"
-known_message = b"user=guest"
-secret_length = 8          # aus --sample, bestätigt durch Crypto.class
+known_message = bytes.fromhex("757365723d6775657374")  # user=guest
+secret_length = 8          # aus f() oder Bytecode-Analyse
 append_data   = b"&user=admin"
 
 sha = hlextend.new('sha256')
 new_message, new_mac = sha.extend(append_data, known_message, secret_length, known_mac)
 
-print("Neue Nachricht (hex):", new_message.hex())
-print("Neuer MAC:           ", new_mac)
+print("Forged message (hex):", new_message.hex())
+print("Forged MAC:          ", new_mac)
+```
+
+### Option B — manuell (ohne Bibliothek)
+
+```python
+import struct
+
+def sha256_pad(n):
+    p = b'\x80' + b'\x00' * ((55 - n) % 64)
+    p += struct.pack('>Q', n * 8)
+    return p
+
+# ... SHA-256 compress-Funktion implementieren ...
+# internen Zustand aus known_mac rekonstruieren,
+# append_data mit sha256_pad(64 + len(append_data)) padden und komprimieren
 ```
 
 ### Übergabe an die Anwendung
 
-Da die Nachricht nicht-druckbare Bytes (Padding) enthält, muss sie als Byte-Literal
-übergeben werden. Einfachster Weg — Python übergibt direkt:
+Die Nachricht wird als Hex-String übergeben — Null-Bytes im Padding sind kein Problem:
 
-```python
-import subprocess
-
-result = subprocess.run(
-    ['java', '-jar', 'vault.jar',
-     new_message.decode('latin-1'),
-     new_mac],
-    capture_output=True, text=True, encoding='latin-1'
-)
-print(result.stdout)
+```bash
+VAULT_SECRET=s3cr3t\!X java -jar vault.jar <forged_hex> <forged_mac>
 ```
 
 Ausgabe:
@@ -190,7 +207,7 @@ FLAG{h4sh_l3ngth_3xt3ns10n_pwn3d}
 
 SHA-256 verarbeitet Daten blockweise (512 Bit). Der finale Hash **ist** der interne
 Zustand nach dem letzten Block. Wer den Hash von `secret || message` kennt, kennt
-diesen Zustand und kann darauf aufbauend weitere Daten häshen.
+diesen Zustand und kann darauf aufbauend weitere Daten häshen — ohne das Secret.
 
 Das korrekte Gegenmittel wäre **HMAC-SHA256**:
 ```
@@ -208,5 +225,5 @@ ist damit nicht möglich.
 | 1 | `java -jar vault.jar --sample` | Ausgangsdaten beschaffen |
 | 2 | `jar xf vault.jar` + `javap` / CFR | `_d()`-Algorithmus aus `Main.class` lesen |
 | 3 | Python-Script | `Crypto.class.encrypted` entschlüsseln |
-| 4 | CFR / javap | Schwachstelle `SHA256(secret\|\|msg)` erkennen |
+| 4 | CFR / javap | Schwachstelle `SHA256(secret\|\|msg)` + Secret-Länge ermitteln |
 | 5 | Python + `hlextend` | Hash verlängern, Flag holen |

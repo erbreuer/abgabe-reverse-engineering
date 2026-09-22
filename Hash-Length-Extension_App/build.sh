@@ -64,6 +64,12 @@ EOF
 
 jar cfm target/vault.jar target/manifest.mf -C "$BUILD" .
 
+# Sync to Try/ if it exists
+if [ -d "../Try" ]; then
+    cp target/vault.jar ../Try/vault.jar
+    echo "Synced: ../Try/vault.jar"
+fi
+
 echo ""
 echo "Build successful: target/vault.jar"
 echo ""

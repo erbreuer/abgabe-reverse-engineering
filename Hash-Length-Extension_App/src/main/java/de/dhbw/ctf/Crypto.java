@@ -2,32 +2,40 @@ package de.dhbw.ctf;
 
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.nio.charset.StandardCharsets;
 
 public class Crypto {
-
-    // SECRET "s3cr3t!X" XOR 0x42
-    private static final byte[] _S = {0x31,0x71,0x21,0x30,0x71,0x36,0x63,0x1a};
 
     // FLAG XOR 0x42
     private static final byte[] _F = {0x4,0xe,0x3,0x5,0x39,0x2a,0x76,0x31,0x2a,0x1d,0x2e,0x71,0x2c,0x25,0x36,0x2a,0x1d,0x71,0x3a,0x36,0x71,0x2c,0x31,0x73,0x72,0x2c,0x1d,0x32,0x35,0x2c,0x71,0x26,0x3f};
 
-    // SECRET_LENGTH: (int)(ln(e^8)) = 8, verschleiert
-    private static final int _L = (int) Math.round(Math.log(Math.exp(8)));
+    private static final byte[] _M = "user=guest".getBytes(StandardCharsets.UTF_8);
 
-    private static final String _M = "user=guest";
+    private static final String _ENV = System.getenv("VAULT_SECRET");
 
     private static String _x(byte[] b) {
         byte[] r = new byte[b.length];
         for (int i = 0; i < b.length; i++) r[i] = (byte) (b[i] ^ 0x42);
-        return new String(r, java.nio.charset.StandardCharsets.UTF_8);
+        return new String(r, StandardCharsets.UTF_8);
+    }
+
+    private static byte[] _secret() {
+        if (_ENV == null) throw new RuntimeException("VAULT_SECRET environment variable not set");
+        return _ENV.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static byte[] _concat(byte[] a, byte[] b) {
+        byte[] r = new byte[a.length + b.length];
+        System.arraycopy(a, 0, r, 0, a.length);
+        System.arraycopy(b, 0, r, a.length, b.length);
+        return r;
     }
 
     // computeMac
-    public static String a(String m) {
+    public static String a(byte[] m) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] input = (_x(_S) + m).getBytes("UTF-8");
-            byte[] hash = md.digest(input);
+            byte[] hash = md.digest(_concat(_secret(), m));
             return HexFormat.of().formatHex(hash);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -35,9 +43,9 @@ public class Crypto {
     }
 
     // extractRole — letztes user= gewinnt
-    public static String b(String m) {
+    public static String b(byte[] m) {
         String r = "unknown";
-        for (String p : m.split("&")) {
+        for (String p : new String(m, StandardCharsets.UTF_8).split("&")) {
             if (p.startsWith("user=")) r = p.substring(5);
         }
         return r;
@@ -46,16 +54,15 @@ public class Crypto {
     // getFlag
     public static String c() { return _x(_F); }
 
-    // getSampleMessage
-    public static String d() { return _M; }
+    // getSampleMessage (hex-encoded)
+    public static String d() { return HexFormat.of().formatHex(_M); }
 
     // getSampleMac
     public static String e() { return a(_M); }
 
-    // getSecretLength
-    public static int f() { return _L; }
-
-    // --- toter Code: sieht aus wie Lizenzprüfung, wird nie aufgerufen ---
+    // getSecretLength: verschleiert über Integer-Rotation
+    public static int f() { return Integer.rotateRight(Integer.rotateLeft(_secret().length, 3), 3); }
+    // --- internal validation ---
 
     private static int _h(String s) {
         int h = 0x1505;

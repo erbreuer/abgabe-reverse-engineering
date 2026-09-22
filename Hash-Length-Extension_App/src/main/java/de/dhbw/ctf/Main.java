@@ -15,6 +15,9 @@ public class Main {
     private static final byte[] _Md = {0x3e};
     private static final byte[] _Me = {0x3f};
 
+    // Methodenname "f" XOR 0x5A
+    private static final byte[] _Mf = {0x3c};
+
     private static String _s(byte[] b) {
         byte[] r = new byte[b.length];
         for (int i = 0; i < b.length; i++) r[i] = (byte) (b[i] ^ 0x5A);
@@ -57,7 +60,7 @@ public class Main {
         }
     }
 
-    // --- toter Code: sieht aus wie ein zweiter Validierungspfad ---
+    // --- internal validation ---
     private static boolean _chk(String s) {
         if (s == null || s.length() < 4) return false;
         int acc = ~(((int) Math.PI ^ Integer.MAX_VALUE >> 16) + Short.MAX_VALUE);
@@ -74,11 +77,23 @@ public class Main {
         EncryptedClassLoader loader = new EncryptedClassLoader(Main.class.getClassLoader());
         Class<?> crypto = loader.loadClass(_s(_C));
 
+        // Trigger early ENV check — f() calls _secret() which throws if VAULT_SECRET is unset
+        try {
+            crypto.getMethod(_s(_Mf)).invoke(null);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause != null && cause.getMessage() != null && cause.getMessage().contains("VAULT_SECRET")) {
+                System.err.println("Error: VAULT_SECRET environment variable not set.");
+                System.exit(1);
+            }
+            throw e;
+        }
+
         if (args[0].equals("--sample")) {
             String msg = (String) crypto.getMethod(_s(_Md)).invoke(null);
             String mac = (String) crypto.getMethod(_s(_Me)).invoke(null);
-            System.out.println("Sample message : " + msg);
-            System.out.println("Sample MAC     : " + mac);
+            System.out.println("Sample message (hex) : " + msg);
+            System.out.println("Sample MAC           : " + mac);
             return;
         }
 
@@ -87,27 +102,37 @@ public class Main {
             System.exit(1);
         }
 
-        String message  = args[0];
-        String inputMac = args[1];
+        String messageHex = args[0];
+        String inputMac   = args[1];
 
-        Method mComputeMac  = crypto.getMethod(_s(_Ma), String.class);
-        Method mExtractRole = crypto.getMethod(_s(_Mb), String.class);
+        byte[] messageBytes;
+        try {
+            messageBytes = java.util.HexFormat.of().parseHex(messageHex);
+        } catch (IllegalArgumentException e) {
+            System.err.println("Error: message must be hex-encoded (e.g. 757365723d6775657374).");
+            System.exit(1);
+            return;
+        }
+
+        Method mComputeMac  = crypto.getMethod(_s(_Ma), byte[].class);
+        Method mExtractRole = crypto.getMethod(_s(_Mb), byte[].class);
         Method mGetFlag     = crypto.getMethod(_s(_Mc));
 
-        String expectedMac = (String) mComputeMac.invoke(null, message);
+        String expectedMac = (String) mComputeMac.invoke(null, (Object) messageBytes);
 
         if (!expectedMac.equalsIgnoreCase(inputMac)) {
             System.out.println("Access denied. Invalid MAC.");
             System.exit(1);
         }
 
-        String role = (String) mExtractRole.invoke(null, message);
+        String role = (String) mExtractRole.invoke(null, (Object) messageBytes);
 
         if ("admin".equals(role)) {
             System.out.println("Access granted.");
             System.out.println((String) mGetFlag.invoke(null));
         } else {
             System.out.println("Access denied. You are: " + role);
+            System.exit(1);
         }
     }
 
@@ -115,16 +140,16 @@ public class Main {
         System.out.println("VaultAccess - Token Validator");
         System.out.println();
         System.out.println("Usage:");
-        System.out.println("  java -jar vault.jar <message> <mac>");
+        System.out.println("  java -jar vault.jar <message-hex> <mac>");
         System.out.println("  java -jar vault.jar --sample");
         System.out.println("  java -jar vault.jar --help");
         System.out.println();
         System.out.println("Arguments:");
-        System.out.println("  message    The access token message (e.g. user=guest)");
-        System.out.println("  mac        SHA-256 MAC for the message (hex)");
+        System.out.println("  message-hex  The access token message, hex-encoded");
+        System.out.println("  mac          SHA-256 MAC for the message (hex)");
         System.out.println();
         System.out.println("Examples:");
         System.out.println("  java -jar vault.jar --sample");
-        System.out.println("  java -jar vault.jar \"user=guest\" <mac>");
+        System.out.println("  java -jar vault.jar 757365723d6775657374 <mac>");
     }
 }
