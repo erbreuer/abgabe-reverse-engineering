@@ -1,5 +1,13 @@
 # KI-Einschätzung: RE-Erschwerung
 
+> **Update:** Seit Version 2 wird `build.sh` um zwei ProGuard-Durchläufe
+> (`proguard/crypto.pro`, `proguard/main.pro`) sowie eine auf drei Fundstellen
+> verteilte Schlüsselableitung für `EncryptedClassLoader` ergänzt. Die
+> folgende Einschätzung (Stufen 1–4) beschrieb den Stand **vor** dieser
+> Änderung; die Kernaussage zu Stufe 2–4 (Schwachstelle + Angriff) bleibt
+> unverändert gültig, nur Stufe 1 und Stufe 3 wurden bewusst verlängert. Siehe
+> "Update: Wirkung von ProGuard + verteiltem Schlüssel" am Ende dieser Datei.
+
 ## Wie gut schützt der Schutzmechanismus gegen KI-gestütztes RE?
 
 ### Stufe 1: Erste Analyse (ohne gezielten Prompt)
@@ -105,3 +113,64 @@ sie verzögert nur das Erkennen der Schwachstelle.
 Das nicht im JAR gespeicherte Secret ist der wesentliche Unterschied zur Vorgängerversion:
 Es zwingt die KI dazu, den Angriff tatsächlich zu verstehen und auszuführen, statt
 das Secret einfach zu extrahieren.
+
+---
+
+## Update: Wirkung von ProGuard + verteiltem Schlüssel
+
+Getestet, indem dieselbe Anwendung einmal **vor** und einmal **nach** der
+Härtung mit KI-Unterstützung (Claude, Tool-Zugriff: Bash, `javap`, Python)
+gelöst wurde.
+
+### Was sich ändert
+
+**Stufe 1 (Main.class lesen) — spürbar länger:**
+Ohne ProGuard hießen alle Felder/Methoden sprechend (`_K`, `_d`, `_C`,
+`_Ma`…`_Mf`, `_s`) — das Lesen des `javap`-Outputs war fast wie
+Klartext-Lesen mit XOR-Rauschen. Mit ProGuard heißen alle privaten
+Bezeichner `a`, `b`, `c`, … (teils mehrfach überladen), `LineNumberTable`
+fehlt, und die innere Klasse sowie die neue dritte Klasse (`VersionInfo`)
+sind ebenfalls zu `Main$a` bzw. `a` umbenannt. Der Entschlüsselungsalgorithmus
+selbst (Byte-Tausch + XOR) bleibt strukturell erkennbar — Bytecode-Muster wie
+`ixor`, `bastore` in einer Schleife verraten sich unabhängig vom Namen —, aber
+das Zuordnen "welches Feld ist der Schlüssel, welches der verschlüsselte
+Name" braucht mehr Schritte.
+
+**Neu: Schlüssel ist nicht mehr an einer Stelle — zusätzlicher Fund nötig:**
+Vorher genügte das Lesen von `Main.class`, um den kompletten
+Entschlüsselungsschlüssel zu haben. Jetzt muss zusätzlich das JAR-Manifest
+(`X-Build-Tag`) und eine dritte, unscheinbar benannte Klasse (`VersionInfo`
+→ nach Obfuskierung `de/dhbw/ctf/a.class`) gefunden und mit XOR
+zusammengeführt werden. Das ist weiterhin mit Bordmitteln lösbar
+(`unzip -p vault.jar META-INF/MANIFEST.MF`, `javap` auf die dritte Klasse),
+aber es ist ein bewusster zusätzlicher Schritt, der nicht übersprungen werden
+kann — ohne alle drei Fragmente ist der XOR-Schlüssel falsch und die
+entschlüsselte `Crypto.class` beginnt nicht mit den gültigen
+`CAFEBABE`-Magic-Bytes, was ein klares, aber erst nach dem Versuch
+sichtbares Fehlersignal ist.
+
+**Stufe 2–4 (Schwachstelle + Angriff) — unverändert:**
+Die sechs öffentlichen `Crypto`-Methoden (`a`–`f`) müssen aus technischen
+Gründen unverändert bleiben, da `Main` sie per Reflection mit Namen aufruft
+— ProGuard kann und darf sie nicht umbenennen. Sobald `Crypto.class`
+entschlüsselt ist, ist das Muster `SHA256(secret||message)` in `a()` genauso
+schnell erkennbar wie vorher; der Length-Extension-Angriff selbst ändert
+sich nicht.
+
+### Aktualisierte Gesamteinschätzung
+
+| Phase | Zeit mit KI (vorher) | Zeit mit KI (nach Härtung) | Haupthindernis (neu) |
+|---|---|---|---|
+| JAR entpacken, Entschlüsselungslogik lesen | ~10 Min | ~20–30 Min | Umbenannte Felder/Methoden, drei statt eine Schlüsselquelle |
+| `Crypto.class` entschlüsseln | ~5 Min | ~8–12 Min | Schlüssel muss aus 3 Fundstellen zusammengesetzt werden |
+| Schwachstelle erkennen | ~2 Min | ~2 Min | unverändert — öffentliche Methoden bleiben lesbar |
+| Secret-Länge ermitteln | ~3 Min | ~3–5 Min | unverändert, plus etwas Sucharbeit durch Umbenennung von `f()`-Umfeld |
+| Exploit ausführen | ~5 Min | ~5 Min | unverändert |
+| **Gesamt** | **~25–45 Min** | **~40–65 Min** | |
+
+**Fazit:** Die Härtung verlängert vor allem die Analysephase (Stufe 1+3), in
+der es um das Verstehen der Verschleierungs- und Loader-Logik geht — nicht
+die Phase, in der die eigentliche kryptografische Schwachstelle erkannt und
+ausgenutzt wird. Das entspricht genau der beabsichtigten Wirkung: der
+Lernwert der Aufgabe (Hash-Length-Extension erkennen und durchführen) bleibt
+unverändert, nur der Weg zur entschlüsselten `Crypto.class` ist aufwändiger.

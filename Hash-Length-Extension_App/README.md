@@ -10,8 +10,9 @@ gibt bei der Rolle `admin` ein Flag aus.
 
 | Tool | Version |
 |---|---|
-| JDK | 21+ (Zielplattform: Ubuntu Linux 26.04 x86-64) |
+| JDK | 21+ (Zielplattform: Ubuntu Linux 26.04 x86-64), getestet mit JDK 26 |
 | Python 3 | 3.8+ (nur für Build-Script) |
+| ProGuard | 7.9+ (Java-26-Class-Dateien werden erst ab dieser Version unterstützt) |
 
 ## Build
 
@@ -64,8 +65,12 @@ VAULT_SECRET=s3cr3t\!X java -jar target/vault.jar \
 Hash-Length-Extension_App/
 ├── src/main/java/de/dhbw/ctf/
 │   ├── Main.java          # Einstiegspunkt + EncryptedClassLoader
-│   └── Crypto.java        # MAC-Logik (wird verschlüsselt ins JAR gepackt)
-├── build.sh               # Build-Script
+│   ├── Crypto.java        # MAC-Logik (wird verschlüsselt ins JAR gepackt)
+│   └── VersionInfo.java   # Drittes Fragment des Loader-Schlüssels
+├── proguard/
+│   ├── crypto.pro         # ProGuard-Config für Crypto.class
+│   └── main.pro           # ProGuard-Config für Main.class + EncryptedClassLoader
+├── build.sh               # Build-Script (javac → ProGuard → XOR-Verschlüsselung → jar)
 ├── AUFGABE.md             # Aufgabenstellung für Schüler
 ├── README.md              # Diese Datei (Nutzerdokumentation)
 ├── LOESUNG.md             # RE-Dokumentation (Schwachstelle + Lösungsweg)

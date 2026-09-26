@@ -34,7 +34,7 @@ public class Main {
             try (InputStream in = getResourceAsStream(path)) {
                 if (in == null) throw new ClassNotFoundException(path);
                 byte[] data = in.readAllBytes();
-                byte[] dec  = _d(data);
+                byte[] dec  = _d(data, _key());
                 return defineClass(name, dec, 0, dec.length);
             } catch (ClassNotFoundException e) {
                 throw e;
@@ -43,19 +43,41 @@ public class Main {
             }
         }
 
-        // XOR-Schlüssel: 2^3 * 17 = 136 = 0x88, verschleiert
-        private static final int _K = (int) (Math.pow(2, 3) * 17);
+        // Lokaler Anteil des Schlüssels.
+        private static final int _K1 = 0x2C;
 
-        private static byte[] _d(byte[] data) {
+        // Der vollständige Schlüssel setzt sich aus drei getrennt liegenden
+        // Anteilen zusammen: dieser Konstante, einem Manifest-Attribut
+        // (build.sh setzt es beim Packen) und VersionInfo.BUILD_TAG.
+        private static int _key() {
+            int k2 = _manifestTag();
+            int k3 = VersionInfo.BUILD_TAG;
+            return _K1 ^ k2 ^ k3;
+        }
+
+        private static int _manifestTag() {
+            try (InputStream in = EncryptedClassLoader.class.getClassLoader()
+                    .getResourceAsStream("META-INF/MANIFEST.MF")) {
+                if (in == null) throw new IllegalStateException("manifest missing");
+                java.util.jar.Manifest mf = new java.util.jar.Manifest(in);
+                String v = mf.getMainAttributes().getValue("X-Build-Tag");
+                if (v == null) throw new IllegalStateException("X-Build-Tag missing");
+                return Integer.parseInt(v.trim());
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        private static byte[] _d(byte[] data, int key) {
             byte[] r = data.clone();
             int n = r.length;
             for (int i = 0; i < n / 2; i++) {
                 byte a = r[i];
                 byte b = r[n - 1 - i];
-                r[i]         = (byte) ((b ^ _K) & 0xFF);
-                r[n - 1 - i] = (byte) ((a ^ _K) & 0xFF);
+                r[i]         = (byte) ((b ^ key) & 0xFF);
+                r[n - 1 - i] = (byte) ((a ^ key) & 0xFF);
             }
-            if (n % 2 == 1) r[n / 2] = (byte) ((r[n / 2] ^ _K) & 0xFF);
+            if (n % 2 == 1) r[n / 2] = (byte) ((r[n / 2] ^ key) & 0xFF);
             return r;
         }
     }

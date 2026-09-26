@@ -39,7 +39,7 @@ de/dhbw/ctf/Crypto.class.encrypted    ← verschlüsselte Klasse
 
 ```bash
 jar xf vault.jar
-javap -c de/dhbw/ctf/Main.class
+javap -p -c de/dhbw/ctf/Main.class
 ```
 
 Oder mit CFR:
@@ -47,34 +47,61 @@ Oder mit CFR:
 java -jar cfr.jar de/dhbw/ctf/Main.class
 ```
 
-Im Bytecode/dekompilierten Code sichtbar:
+**Hinweis:** `Main.class` ist mit ProGuard obfuskiert (private Felder/Methoden
+heißen `a`, `b`, `c`, … statt sprechend; keine `LineNumberTable`;
+Kontrollfluss teils verschachtelt). `main()` selbst ist unverändert
+vorhanden (Pflicht-Einstiegspunkt), der Rest muss über die Bytecode-Struktur
+erschlossen werden statt über Namen.
 
-**`EncryptedClassLoader.findClass()`** lädt `Crypto.class.encrypted` und ruft `_d()` auf.
+Im Bytecode/dekompilierten Code sichtbar (Namen hier zur Lesbarkeit wie im
+Source-Code benannt, im JAR selbst sind sie umbenannt):
 
-**`_d()` — die Entschlüsselungsfunktion:**
+**`EncryptedClassLoader.findClass()`** lädt `Crypto.class.encrypted` und ruft
+eine Entschlüsselungsfunktion mit einem zusammengesetzten Schlüssel auf.
+
+**Der Schlüssel besteht aus drei getrennt liegenden Anteilen** (nicht mehr
+einer einzelnen Konstante):
 ```java
-private static final int _K = (int)(Math.pow(2, 3) * 17);  // = 136 = 0x88
+private static final int _K1 = 0x2C;                  // in Main.class
 
-private static byte[] _d(byte[] data) {
+private static int _key() {
+    int k2 = _manifestTag();                           // aus MANIFEST.MF: X-Build-Tag
+    int k3 = VersionInfo.BUILD_TAG;                     // aus VersionInfo.class
+    return _K1 ^ k2 ^ k3;
+}
+```
+Alle drei Fundstellen müssen zusammengeführt werden, um den vollständigen
+Schlüssel (`136 = 0x88`) zu erhalten:
+- `_K1` steht im Bytecode von `Main$EncryptedClassLoader`
+- `X-Build-Tag` steht im JAR-Manifest (`unzip -p vault.jar META-INF/MANIFEST.MF`)
+- `VersionInfo.BUILD_TAG` steht in einer eigenen, unscheinbar benannten Klasse
+
+**Die Entschlüsselungsfunktion selbst** (Byte-Tausch + XOR, unverändert):
+```java
+private static byte[] _d(byte[] data, int key) {
     byte[] r = data.clone();
     int n = r.length;
     for (int i = 0; i < n / 2; i++) {
         byte a = r[i];
         byte b = r[n - 1 - i];
-        r[i]         = (byte) ((b ^ _K) & 0xFF);
-        r[n - 1 - i] = (byte) ((a ^ _K) & 0xFF);
+        r[i]         = (byte) ((b ^ key) & 0xFF);
+        r[n - 1 - i] = (byte) ((a ^ key) & 0xFF);
     }
-    if (n % 2 == 1) r[n / 2] = (byte) ((r[n / 2] ^ _K) & 0xFF);
+    if (n % 2 == 1) r[n / 2] = (byte) ((r[n / 2] ^ key) & 0xFF);
     return r;
 }
 ```
 
-Algorithmus: Byte-Paare von außen nach innen tauschen, jeden Byte mit `0x88` XOR'n.
-Die Operation ist **selbstinvers** — `_d(_d(x)) == x`.
+Algorithmus: Byte-Paare von außen nach innen tauschen, jeden Byte mit dem
+zusammengesetzten Schlüssel XOR'n. Die Operation ist **selbstinvers** —
+`_d(_d(x, k), k) == x`.
 
 ---
 
 ## Schritt 3: Crypto.class entschlüsseln
+
+Der Schlüssel `0x88` muss zuerst aus den drei Anteilen aus Schritt 2
+rekonstruiert werden (`_K1 ^ X-Build-Tag ^ VersionInfo.BUILD_TAG`), dann:
 
 ```python
 with open('de/dhbw/ctf/Crypto.class.encrypted', 'rb') as f:
@@ -107,7 +134,11 @@ xxd /tmp/Crypto.class | head -1
 java -jar cfr.jar /tmp/Crypto.class
 ```
 
-Sichtbar im dekompilierten Code:
+`Crypto.class` ist ebenfalls mit ProGuard obfuskiert (private Felder/Methoden
+umbenannt, `LineNumberTable` entfernt). Die sechs öffentlichen Methoden
+(`a`–`f`) sind unverändert vorhanden — sie müssen es sein, da `Main` sie per
+Reflection mit Namen aufruft. Sichtbar im dekompilierten Code (Namen hier zur
+Lesbarkeit wie im Source benannt):
 
 ```java
 // Secret kommt aus der Umgebungsvariable VAULT_SECRET — nicht im JAR gespeichert
@@ -223,7 +254,18 @@ ist damit nicht möglich.
 | Schritt | Tool | Zweck |
 |---|---|---|
 | 1 | `java -jar vault.jar --sample` | Ausgangsdaten beschaffen |
-| 2 | `jar xf vault.jar` + `javap` / CFR | `_d()`-Algorithmus aus `Main.class` lesen |
-| 3 | Python-Script | `Crypto.class.encrypted` entschlüsseln |
-| 4 | CFR / javap | Schwachstelle `SHA256(secret\|\|msg)` + Secret-Länge ermitteln |
+| 2 | `jar xf vault.jar` + `javap -p` / CFR | Entschlüsselungslogik + Schlüsselfragmente aus `Main.class` und `MANIFEST.MF` lesen (ProGuard-obfuskiert — Namen sind bedeutungslos, Struktur bleibt lesbar) |
+| 3 | Python-Script | `Crypto.class.encrypted` entschlüsseln (Schlüssel aus 3 Fragmenten zusammensetzen) |
+| 4 | CFR / javap -p | Schwachstelle `SHA256(secret\|\|msg)` + Secret-Länge ermitteln (auch hier: öffentliche Methoden `a`–`f` bleiben benannt, Rest ist obfuskiert) |
 | 5 | Python + `hlextend` | Hash verlängern, Flag holen |
+
+## Build-Prozess (für Nachvollziehbarkeit)
+
+Seit der Härtung läuft `build.sh` in 7 statt 4 Schritten: Nach dem Kompilieren
+von `Crypto.java` bzw. `Main.java`/`VersionInfo.java` läuft jeweils ein
+ProGuard-Durchlauf (`proguard/crypto.pro`, `proguard/main.pro`), der private
+Bezeichner umbenennt und Debug-Infos entfernt — die öffentliche Struktur
+(Einstiegspunkt `main()`, die sechs reflektiv aufgerufenen `Crypto`-Methoden)
+bleibt zwingend erhalten. Die XOR-Verschlüsselung von `Crypto.class` läuft
+danach auf dem bereits obfuskierten ProGuard-Output. Details siehe
+`build.sh` und die Kommentare in `proguard/*.pro`.
