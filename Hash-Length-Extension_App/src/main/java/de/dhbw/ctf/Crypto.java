@@ -4,6 +4,19 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.nio.charset.StandardCharsets;
 
+// Wird von Main ausschließlich reflektiv geladen (per EncryptedClassLoader,
+// siehe Main.java) und aufgerufen (getMethod("a"/"b"/.../"f")). Die
+// Klartext-Version dieser Datei liegt nie im JAR — build.sh verschlüsselt
+// sie zu Crypto.class.encrypted; nur der Loader in Main kann sie zur
+// Laufzeit wiederherstellen.
+//
+// Kernschwachstelle der Klasse: a() berechnet den MAC als
+// SHA256(secret || message) statt HMAC. Da SHA-256 Merkle-Damgaard-basiert
+// ist, legt der Hash-Output den kompletten internen Zustand offen — wer
+// SHA256(secret||message) und die Bytelänge von secret||message kennt,
+// kann den Hash für secret||message||padding||beliebiges_suffix
+// weiterrechnen, ohne secret zu kennen (Hash-Length-Extension). Siehe
+// LOESUNG.md für den vollständigen Angriff.
 public class Crypto {
 
     // Flag, verschlüsselt mit einem aus SHA-256(secret || _FREF) abgeleiteten
@@ -55,6 +68,10 @@ public class Crypto {
         return r;
     }
 
+    // Erzeugt einen len-Byte-Schlüsselstrom aus SHA256(secret||_FREF),
+    // bei Bedarf über mehrere 32-Byte-Blöcke verkettet
+    // (block_i+1 = SHA256(block_i)). Dient nur der Flag-Verschlüsselung
+    // in c() — unabhängig vom MAC-Schema in a().
     private static byte[] _keystream(int len) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -80,7 +97,9 @@ public class Crypto {
         return r;
     }
 
-    // computeMac
+    // computeMac: SHA256(secret || message) als Hex-String. Secret-Prefix-
+    // MAC statt HMAC — siehe Klassenkommentar oben, das ist die eigentliche
+    // Schwachstelle der Anwendung.
     public static String a(byte[] m) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -91,7 +110,10 @@ public class Crypto {
         }
     }
 
-    // extractRole — letztes user= gewinnt
+    // extractRole: parst "key=value&key=value..." und gibt den Wert des
+    // LETZTEN "user="-Parameters zurück (frühere Treffer werden
+    // überschrieben). Kein Schutz gegen doppelte Keys — genau das macht
+    // die Length-Extension-Nutzlast "&user=admin" wirksam.
     public static String b(byte[] m) {
         String r = "unknown";
         for (String p : new String(m, StandardCharsets.UTF_8).split("&")) {
@@ -114,16 +136,28 @@ public class Crypto {
     // getSampleMac
     public static String e() { return a(_M); }
 
-    // getSecretLength: verschleiert über Integer-Rotation
+    // getSecretLength: rotateLeft(n,3) gefolgt von rotateRight(n,3) ist
+    // mathematisch die Identität — liefert also 1:1 die Secret-Länge,
+    // nur als "kryptische Berechnung" getarnt. Main.main() ruft f() im
+    // regulären CLI-Pfad NIE auf (weder bei --sample noch beim
+    // Zwei-Argument-Modus) — die Secret-Länge ist über die CLI also
+    // nicht direkt abrufbar, nur per Reflection oder Bytecode-Analyse
+    // von _S.length.
     public static int f() { return Integer.rotateRight(Integer.rotateLeft(_secret().length, 3), 3); }
-    // --- internal validation ---
 
+    // --- internal validation ---
+    // Ab hier: toter Code. Main.main() ruft keine dieser drei Methoden
+    // jemals auf — reine Ablenkung für den Fall, dass jede Methode der
+    // Klasse für sicherheitsrelevant gehalten wird.
+
+    // djb2-artiger String-Hash, ungenutzt.
     private static int _h(String s) {
         int h = 0x1505;
         for (char c : s.toCharArray()) h = h * 33 + c;
         return h & 0xFFFFFF;
     }
 
+    // Simpler XOR-Vergleich gegen ein festes Referenz-Array, ungenutzt.
     private static boolean _v(String k) {
         int[] ref = {0x4f, 0x2a, 0x91, 0xb3};
         byte[] kb = k.getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -133,6 +167,7 @@ public class Crypto {
         return kb.length >= ref.length;
     }
 
+    // ROT13, ungenutzt.
     private static String _r(String s) {
         StringBuilder sb = new StringBuilder();
         for (char c : s.toCharArray()) {

@@ -1,0 +1,913 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VaultAccess Innenansicht</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,500;0,600;0,700;1,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout concept: a two-tab technical explainer. Tab 1 reads top-down as a
+   build pipeline + runtime trace (source -> obfuscation -> encryption ->
+   jar, then the call chain through main()). Tab 2 reads as a diagnosis:
+   the vulnerable formula front and center, the attack derivation step by
+   step, and a closing ledger comparing the intended crypto attack against
+   the bytecode shortcut. Vault/ledger visual language throughout, shared
+   with the earlier architecture artifact but built fresh as a static file. */
+:root{
+  --paper: #f6f3ec;
+  --paper-raised: #fffefb;
+  --ink: #241f18;
+  --ink-dim: #6b6255;
+  --line: #d9d1c0;
+  --brass: #9c7a3c;
+  --brass-deep: #7a5c26;
+  --vault: #2f4a3e;
+  --vault-deep: #1d3129;
+  --alarm: #a8402c;
+  --alarm-soft: #f1ddd5;
+  --ok-soft: #dde6dc;
+  --font-display: 'Spectral', Georgia, 'Times New Roman', serif;
+  --font-body: 'IBM Plex Sans', -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper: #1b1712;
+    --paper-raised: #241f18;
+    --ink: #ece5d6;
+    --ink-dim: #a89b85;
+    --line: #45392b;
+    --brass: #c9a35f;
+    --brass-deep: #e0b877;
+    --vault: #7fae95;
+    --vault-deep: #a8cdb6;
+    --alarm: #e28268;
+    --alarm-soft: #3a241d;
+    --ok-soft: #24352a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper: #1b1712;
+  --paper-raised: #241f18;
+  --ink: #ece5d6;
+  --ink-dim: #a89b85;
+  --line: #45392b;
+  --brass: #c9a35f;
+  --brass-deep: #e0b877;
+  --vault: #7fae95;
+  --vault-deep: #a8cdb6;
+  --alarm: #e28268;
+  --alarm-soft: #3a241d;
+  --ok-soft: #24352a;
+  color-scheme: dark;
+}
+
+*{box-sizing:border-box;}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--font-body);
+  line-height:1.55;
+}
+.wrap{
+  max-width:960px;
+  margin-inline:auto;
+  padding-inline:20px;
+  padding-block:40px;
+  display:flex;
+  flex-direction:column;
+  gap:32px;
+}
+
+/* ---------- Header ---------- */
+header{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.eyebrow{
+  font-family:var(--font-mono);
+  font-size:0.72rem;
+  letter-spacing:0.14em;
+  text-transform:uppercase;
+  color:var(--brass-deep);
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.eyebrow::before{
+  content:"";
+  width:7px;height:7px;
+  border-radius:50%;
+  background:var(--brass);
+  display:inline-block;
+}
+h1{
+  font-family:var(--font-display);
+  font-weight:700;
+  font-size:clamp(1.7rem, 4.5vw, 2.3rem);
+  margin:0;
+  text-wrap:balance;
+  letter-spacing:-0.01em;
+}
+.dek{
+  font-size:1rem;
+  color:var(--ink-dim);
+  max-width:68ch;
+  margin:0;
+}
+.dek code{
+  font-family:var(--font-mono);
+  font-size:0.88em;
+  background:var(--paper-raised);
+  border:1px solid var(--line);
+  padding:0.1em 0.4em;
+  border-radius:4px;
+  color:var(--vault-deep);
+}
+
+/* ---------- Tabs ---------- */
+.tabbar{
+  display:flex;
+  gap:4px;
+  border-bottom:1px solid var(--line);
+  position:sticky;
+  top:env(safe-area-inset-top, 0px);
+  background:var(--paper);
+  z-index:10;
+  padding-top:4px;
+}
+.tab-btn{
+  font-family:var(--font-body);
+  font-weight:600;
+  font-size:0.92rem;
+  padding:12px 18px;
+  background:none;
+  border:none;
+  border-bottom:2px solid transparent;
+  color:var(--ink-dim);
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.tab-btn .num{
+  font-family:var(--font-mono);
+  font-size:0.72rem;
+  color:var(--brass-deep);
+}
+.tab-btn:hover{color:var(--ink);}
+.tab-btn[aria-selected="true"]{
+  color:var(--ink);
+  border-bottom-color:var(--brass);
+}
+.tab-btn:focus-visible{outline:2px solid var(--brass); outline-offset:2px;}
+
+.panel{display:none; flex-direction:column; gap:40px;}
+.panel.active{display:flex;}
+
+/* ---------- Section scaffolding ---------- */
+section{display:flex; flex-direction:column; gap:16px;}
+.section-head{display:flex; flex-direction:column; gap:6px;}
+.section-num{
+  font-family:var(--font-mono);
+  font-size:0.7rem;
+  letter-spacing:0.12em;
+  color:var(--brass-deep);
+  text-transform:uppercase;
+}
+h2{
+  font-family:var(--font-display);
+  font-weight:600;
+  font-size:1.35rem;
+  margin:0;
+  text-wrap:balance;
+}
+h3{
+  font-family:var(--font-display);
+  font-weight:600;
+  font-size:1.05rem;
+  margin:0;
+}
+p{margin:0;}
+.lede{color:var(--ink-dim); max-width:70ch; font-size:0.94rem;}
+
+/* ---------- Pipeline diagram (Tab 1) ---------- */
+.pipeline{
+  display:flex;
+  flex-direction:column;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--paper-raised);
+  overflow:hidden;
+}
+.stage{
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:16px;
+  padding:16px 18px;
+  border-bottom:1px solid var(--line);
+  position:relative;
+}
+.stage:last-child{border-bottom:none;}
+.stage-icon{
+  width:32px;height:32px;
+  border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-mono);
+  font-size:0.74rem;
+  font-weight:600;
+  background:var(--paper);
+  border:1px solid var(--line);
+  color:var(--brass-deep);
+  flex-shrink:0;
+}
+.stage-body{display:flex; flex-direction:column; gap:3px; min-width:0;}
+.stage-title{
+  font-weight:600;
+  font-size:0.94rem;
+  display:flex;
+  align-items:baseline;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.stage-file{
+  font-family:var(--font-mono);
+  font-size:0.76rem;
+  color:var(--ink-dim);
+  font-weight:400;
+}
+.stage-desc{font-size:0.87rem; color:var(--ink-dim); max-width:68ch;}
+.stage code{
+  font-family:var(--font-mono);
+  font-size:0.85em;
+  background:var(--paper);
+  border:1px solid var(--line);
+  padding:0.05em 0.35em;
+  border-radius:4px;
+}
+
+/* ---------- Call chain (Tab 1) ---------- */
+.callchain{
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--paper-raised);
+  overflow:hidden;
+}
+.call-row{
+  display:grid;
+  grid-template-columns:28px 1fr;
+  gap:12px;
+  padding:13px 18px;
+  border-bottom:1px solid var(--line);
+  align-items:start;
+  font-size:0.88rem;
+}
+.call-row:last-child{border-bottom:none;}
+.call-num{
+  font-family:var(--font-mono);
+  font-size:0.78rem;
+  color:var(--brass-deep);
+  font-weight:600;
+}
+.call-row .call-code{
+  font-family:var(--font-mono);
+  font-size:0.82rem;
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:5px;
+  padding:6px 10px;
+  display:block;
+  overflow-x:auto;
+  color:var(--vault-deep);
+  margin-block:4px;
+}
+.call-row .call-desc{color:var(--ink-dim);}
+
+/* ---------- Mechanism cards ---------- */
+.mechanisms{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+@media (max-width:640px){ .mechanisms{grid-template-columns:1fr;} }
+.mech-card{
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--paper-raised);
+  padding:18px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.mech-tag{
+  font-family:var(--font-mono);
+  font-size:0.66rem;
+  letter-spacing:0.1em;
+  text-transform:uppercase;
+  padding:3px 8px;
+  border-radius:5px;
+  width:fit-content;
+}
+.mech-tag.real{ background:var(--ok-soft); color:var(--vault-deep); }
+.mech-tag.cosmetic{ background:var(--alarm-soft); color:var(--alarm); }
+.mech-card .formula{
+  font-family:var(--font-mono);
+  font-size:0.82rem;
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:6px;
+  padding:9px 11px;
+  color:var(--vault-deep);
+  overflow-x:auto;
+}
+.mech-card p{font-size:0.87rem; color:var(--ink-dim);}
+
+/* ---------- Fault callout (Tab 2) ---------- */
+.fault{
+  border:1px solid var(--alarm);
+  border-radius:10px;
+  background:var(--alarm-soft);
+  padding:22px;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.fault-label{
+  font-family:var(--font-mono);
+  font-size:0.68rem;
+  letter-spacing:0.14em;
+  color:var(--alarm);
+  font-weight:600;
+}
+.fault h3{color:var(--ink);}
+.fault-formula{
+  font-family:var(--font-mono);
+  font-size:0.95rem;
+  background:var(--paper-raised);
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:16px 18px;
+  color:var(--ink);
+  overflow-x:auto;
+  text-align:center;
+  letter-spacing:0.02em;
+}
+.fault p{color:var(--ink); font-size:0.92rem;}
+.fault p.note{color:var(--ink-dim); font-size:0.85rem;}
+
+/* ---------- Attack steps (Tab 2) ---------- */
+.attack-steps{
+  display:flex;
+  flex-direction:column;
+  gap:0;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--paper-raised);
+  overflow:hidden;
+}
+.astep{
+  display:grid;
+  grid-template-columns:36px 1fr;
+  gap:14px;
+  padding:16px 18px;
+  border-bottom:1px solid var(--line);
+}
+.astep:last-child{border-bottom:none;}
+.astep-num{
+  font-family:var(--font-display);
+  font-weight:700;
+  font-size:1.3rem;
+  color:var(--brass);
+  line-height:1.1;
+}
+.astep-body{display:flex; flex-direction:column; gap:6px;}
+.astep-title{font-weight:600; font-size:0.92rem;}
+.astep-desc{font-size:0.87rem; color:var(--ink-dim);}
+.astep code, .astep .mono-block{
+  font-family:var(--font-mono);
+  font-size:0.8rem;
+}
+.mono-block{
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:6px;
+  padding:8px 11px;
+  overflow-x:auto;
+  color:var(--vault-deep);
+  white-space:pre;
+}
+
+/* ---------- Ledger table ---------- */
+.ledger{
+  border:1px solid var(--line);
+  border-radius:10px;
+  overflow:hidden;
+  background:var(--paper-raised);
+}
+.ledger-row{
+  display:grid;
+  grid-template-columns:1.3fr 1fr 2fr;
+  gap:14px;
+  padding:13px 18px;
+  border-bottom:1px solid var(--line);
+  align-items:start;
+}
+.ledger-row.head{
+  background:var(--paper);
+  font-family:var(--font-mono);
+  font-size:0.66rem;
+  letter-spacing:0.1em;
+  text-transform:uppercase;
+  color:var(--ink-dim);
+  padding-block:10px;
+}
+.ledger-row:last-child{border-bottom:none;}
+.ledger-item{font-weight:600; font-size:0.9rem;}
+.ledger-item .file{
+  display:block;
+  font-family:var(--font-mono);
+  font-weight:400;
+  font-size:0.74rem;
+  color:var(--ink-dim);
+  margin-top:2px;
+}
+.status-pill{
+  font-family:var(--font-mono);
+  font-size:0.7rem;
+  letter-spacing:0.04em;
+  padding:3px 9px;
+  border-radius:20px;
+  width:fit-content;
+  white-space:nowrap;
+}
+.status-pill.solid{ background:var(--ok-soft); color:var(--vault-deep); }
+.status-pill.weak{ background:var(--alarm-soft); color:var(--alarm); }
+.ledger-detail{font-size:0.85rem; color:var(--ink-dim);}
+@media (max-width:640px){
+  .ledger-row{grid-template-columns:1fr; gap:6px;}
+  .ledger-row.head{display:none;}
+}
+
+/* ---------- Two-column comparison (Tab 2 closing) ---------- */
+.compare{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+@media (max-width:640px){ .compare{grid-template-columns:1fr;} }
+.compare-card{
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--paper-raised);
+  padding:18px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.compare-card h3{font-size:1rem;}
+.compare-card ul{
+  margin:0;
+  padding-left:1.1em;
+  font-size:0.86rem;
+  color:var(--ink-dim);
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+}
+.compare-card ul li::marker{color:var(--brass);}
+
+/* ---------- Fix table ---------- */
+.fixes{display:flex; flex-direction:column; gap:12px;}
+.fix{
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:14px;
+  padding:15px 18px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--paper-raised);
+}
+.fix-num{
+  font-family:var(--font-display);
+  font-size:1.3rem;
+  font-weight:600;
+  color:var(--vault);
+  line-height:1;
+}
+.fix h4{
+  font-family:var(--font-body);
+  font-weight:600;
+  font-size:0.9rem;
+  margin:0 0 3px 0;
+}
+.fix p{font-size:0.85rem; color:var(--ink-dim);}
+
+footer{
+  border-top:1px solid var(--line);
+  padding-top:18px;
+  font-size:0.78rem;
+  color:var(--ink-dim);
+  font-family:var(--font-mono);
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">de.dhbw.ctf &middot; VaultAccess</div>
+    <h1>Wie VaultAccess wirklich verriegelt ist</h1>
+    <p class="dek">Ein Rundgang durch <code>vault.jar</code>: Build-Pipeline, Laufzeit-Kontrollfluss und die eine kryptographische Schwachstelle, die den ganzen Mechanismus trägt.</p>
+  </header>
+
+  <div class="tabbar" role="tablist" aria-label="Ansicht wählen">
+    <button class="tab-btn" id="tab-btn-1" role="tab" aria-selected="true" aria-controls="tab-1" onclick="selectTab(1)">
+      <span class="num">01</span> Programmaufbau / Ablauf
+    </button>
+    <button class="tab-btn" id="tab-btn-2" role="tab" aria-selected="false" aria-controls="tab-2" onclick="selectTab(2)">
+      <span class="num">02</span> Schwachstelle
+    </button>
+  </div>
+
+  <!-- ================= TAB 1: PROGRAMMAUFBAU / ABLAUF ================= -->
+  <div class="panel active" id="tab-1" role="tabpanel" aria-labelledby="tab-btn-1">
+
+    <section>
+      <div class="section-head">
+        <span class="section-num">Build-Pipeline</span>
+        <h2>Vom Quelltext zur ausgelieferten JAR</h2>
+        <p class="lede"><code>build.sh</code> durchläuft acht Schritte. <code>Crypto</code> wird obfuskiert <em>und</em> anschließend byteweise "verschlüsselt"; <code>Main</code> wird nur obfuskiert, bleibt aber normal ladbar &mdash; sie muss es sein, denn die JVM startet über sie.</p>
+      </div>
+
+      <div class="pipeline">
+        <div class="stage">
+          <div class="stage-icon">1</div>
+          <div class="stage-body">
+            <div class="stage-title">Secret &amp; Flag vorverschlüsseln<span class="stage-file">build.sh</span></div>
+            <div class="stage-desc">Python-Vorlauf berechnet <code>_S</code> (Secret, XOR-kodiert) und <code>_F</code> (Flag, keystream-verschlüsselt) neu und schreibt sie direkt in <code>Crypto.java</code>, bevor kompiliert wird.</div>
+          </div>
+        </div>
+        <div class="stage">
+          <div class="stage-icon">2</div>
+          <div class="stage-body">
+            <div class="stage-title">Kompilieren<span class="stage-file">Main, VersionInfo, RuntimeTag, Crypto</span></div>
+            <div class="stage-desc">In einem Durchgang, weil <code>Crypto._secret()</code> jetzt direkt <code>Main.EncryptedClassLoader._key()</code> referenziert &mdash; eine echte Compile-Zeit-Abhängigkeit, keine Reflection.</div>
+          </div>
+        </div>
+        <div class="stage">
+          <div class="stage-icon">3</div>
+          <div class="stage-body">
+            <div class="stage-title">Main obfuskieren<span class="stage-file">proguard/main.pro</span></div>
+            <div class="stage-desc">ProGuard benennt private Felder/Methoden um, entfernt Debug-Infos, schreibt ein Mapping heraus (<code>-printmapping</code>), das der nächste Schritt braucht.</div>
+          </div>
+        </div>
+        <div class="stage">
+          <div class="stage-icon">4</div>
+          <div class="stage-body">
+            <div class="stage-title">Crypto obfuskieren<span class="stage-file">proguard/crypto.pro</span></div>
+            <div class="stage-desc">Wendet das Mapping aus Schritt 3 an (<code>-applymapping</code>), damit <code>Crypto.class</code> dieselben verschleierten Namen für <code>Main</code>/<code>Main$a</code> referenziert wie das tatsächlich ausgelieferte <code>Main.class</code>. Die sechs öffentlichen Methoden <code>a()&ndash;f()</code> bleiben unverändert &mdash; <code>Main</code> ruft sie per Reflection mit Namen auf.</div>
+          </div>
+        </div>
+        <div class="stage">
+          <div class="stage-icon">5</div>
+          <div class="stage-body">
+            <div class="stage-title">Crypto.class "verschlüsseln"<span class="stage-file">Byte-Reverse + XOR</span></div>
+            <div class="stage-desc">Array spiegeln, jedes Byte mit dem Loader-Schlüssel XOR-en &rarr; landet als <code>Crypto.class.encrypted</code> im JAR. Derselbe Schlüssel, den <code>Main.EncryptedClassLoader._key()</code> zur Laufzeit berechnet.</div>
+          </div>
+        </div>
+        <div class="stage">
+          <div class="stage-icon">6&ndash;8</div>
+          <div class="stage-body">
+            <div class="stage-title">Manifest schreiben, packen, synchronisieren</div>
+            <div class="stage-desc">Manifest bekommt <code>X-Build-Tag</code> und <code>X-Secret-Tag</code> &mdash; zwei zur Build-Zeit fixierte Werte, die Teil der Laufzeit-Schlüsselableitung werden.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <span class="section-num">Laufzeit</span>
+        <h2>Der Kontrollfluss von <code>main()</code></h2>
+        <p class="lede">Sechs Schritte vom Programmstart bis zur Flag-Ausgabe &mdash; jeder Aufruf an <code>Crypto</code> läuft über Reflection, nie über einen direkten Methodenaufruf.</p>
+      </div>
+      <div class="callchain">
+        <div class="call-row">
+          <div class="call-num">1</div>
+          <div>
+            <div class="call-desc">Argumente prüfen. Kein Argument oder <code>--help</code> &rarr; Hilfetext, Programmende.</div>
+          </div>
+        </div>
+        <div class="call-row">
+          <div class="call-num">2</div>
+          <div>
+            <span class="call-code">EncryptedClassLoader loader = new EncryptedClassLoader(...);<br>Class&lt;?&gt; crypto = loader.loadClass(_s(_C));</span>
+            <div class="call-desc"><code>_s(_C)</code> dekodiert den XOR-verschleierten Klassennamen <code>"de.dhbw.ctf.Crypto"</code>. Das Laden selbst löst <code>findClass()</code> aus &rarr; entschlüsselt <code>Crypto.class.encrypted</code> mit dem Loader-Schlüssel.</div>
+          </div>
+        </div>
+        <div class="call-row">
+          <div class="call-num">3</div>
+          <div>
+            <div class="call-desc"><code>--sample</code>: ruft <code>Crypto.d()</code> (Beispiel-Nachricht, hex) und <code>Crypto.e()</code> (deren MAC) auf, druckt beides, Programmende. Kein Secret nötig auf Aufruferseite &mdash; die App liest ihr eigenes eingebettetes Secret selbst.</div>
+          </div>
+        </div>
+        <div class="call-row">
+          <div class="call-num">4</div>
+          <div>
+            <span class="call-code">String expectedMac = crypto.a(messageBytes);<br>if (!expectedMac.equalsIgnoreCase(inputMac)) → "Access denied. Invalid MAC."</span>
+            <div class="call-desc">Zwei-Argument-Modus: <code>Crypto.a()</code> berechnet den MAC für die eingereichte Nachricht neu und vergleicht ihn mit dem übergebenen. Akzeptiert <strong>jede</strong> Nachricht, für die der Aufrufer einen passenden MAC liefert.</div>
+          </div>
+        </div>
+        <div class="call-row">
+          <div class="call-num">5</div>
+          <div>
+            <span class="call-code">String role = crypto.b(messageBytes);</span>
+            <div class="call-desc">Rollenprüfung <strong>nach</strong> der MAC-Prüfung, auf denselben Bytes. Gibt das letzte <code>user=</code>-Feld zurück &mdash; auch wenn diese Bytes durch Length-Extension um ein zweites <code>&amp;user=admin</code> verlängert wurden.</div>
+          </div>
+        </div>
+        <div class="call-row">
+          <div class="call-num">6</div>
+          <div>
+            <div class="call-desc"><code>role.equals("admin")</code> &rarr; <code>Access granted.</code> + <code>Crypto.c()</code> (Flag, aus dem Secret abgeleitet entschlüsselt). Sonst <code>Access denied. You are: &lt;role&gt;</code>.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <span class="section-num">Zwei unabhängige Schichten</span>
+        <h2>Verschleierung schützt den Weg dorthin &mdash; nicht das Ziel selbst</h2>
+        <p class="lede">Die Anwendung hat zwei völlig getrennte Mechanismen. Nur einer davon ist ein echtes kryptographisches Problem.</p>
+      </div>
+      <div class="mechanisms">
+        <div class="mech-card">
+          <span class="mech-tag cosmetic">verzögert, bricht nicht</span>
+          <h3>Verteilter Loader-/Secret-Schlüssel</h3>
+          <p class="formula">key = SHA256(f1 ‖ f2 ‖ f3 ‖ f4)[0:4]</p>
+          <p>Vier Fragmente &mdash; Bytecode-Konstanten, Manifest-Attribute, ein zweiter Methodenaufruf &mdash; werden per SHA-256 zu einem Schlüssel verdichtet, mit dem <code>Crypto.class.encrypted</code> bzw. das eingebettete Secret entschlüsselt werden. Alle Fragmente liegen unverschlüsselt in derselben JAR.</p>
+        </div>
+        <div class="mech-card">
+          <span class="mech-tag real">echte Schwachstelle</span>
+          <h3>Secret-Prefix-MAC</h3>
+          <p class="formula">MAC = SHA256( secret ‖ message )</p>
+          <p>SHA-256 ist Merkle&ndash;Damgaard-basiert: der Hash-Output <em>ist</em> der komplette interne Zustand. Das ist der eigentliche Lerninhalt der Aufgabe &mdash; Details in Tab 2.</p>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ================= TAB 2: SCHWACHSTELLE ================= -->
+  <div class="panel" id="tab-2" role="tabpanel" aria-labelledby="tab-btn-2">
+
+    <section>
+      <div class="section-head">
+        <span class="section-num">Diagnose</span>
+        <h2>Ein Secret-Prefix-MAC ist kein MAC</h2>
+      </div>
+      <div class="fault">
+        <span class="fault-label">Bruchstelle</span>
+        <h3>SHA256(secret ‖ message) statt HMAC</h3>
+        <div class="fault-formula">MAC(m) = SHA256( secret ‖ m )</div>
+        <p>SHA-256 verarbeitet Daten in 64-Byte-Blöcken. Der 32-Byte-Output nach dem letzten Block <strong>ist</strong> der komplette interne Zustand &mdash; er wird nicht weiter verdichtet oder verschlüsselt. Wer <code>SHA256(secret‖message)</code> und die exakte Bytelänge von <code>secret‖message</code> kennt, kann daraus den Zustand rekonstruieren und nahtlos weiterrechnen, als hätte man <code>secret‖message‖padding‖suffix</code> gehasht &mdash; für ein selbst gewähltes <code>suffix</code>, ohne <code>secret</code> je gesehen zu haben.</p>
+        <p class="note">Das ist die <strong>Hash-Length-Extension</strong>-Schwäche aller Merkle&ndash;Damgaard-Hashes (MD5, SHA-1, SHA-2), sobald sie naiv als <code>hash(secret‖data)</code>-MAC verwendet werden.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <span class="section-num">Warum genau diese Anwendung angreifbar ist</span>
+        <h2>Zwei Designfehler zusammen ergeben den Exploit</h2>
+      </div>
+      <div class="mechanisms">
+        <div class="mech-card">
+          <span class="mech-tag cosmetic">Fehler 1</span>
+          <h3>Kein HMAC, keine Domain-Separation</h3>
+          <p>Weder Längenprüfung noch ein Präfix/Suffix, das Length-Extension verhindern würde. <code>Crypto.a()</code> ist die einzige Prüfschicht.</p>
+        </div>
+        <div class="mech-card">
+          <span class="mech-tag cosmetic">Fehler 2</span>
+          <h3>Letzter <code>user=</code>-Wert gewinnt</h3>
+          <p><code>Crypto.b()</code> parst <code>key=value&amp;...</code> und überschreibt bei jedem weiteren <code>user=</code>-Treffer den vorherigen. Ein angehängtes <code>&amp;user=admin</code> gewinnt also automatisch.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <span class="section-num">Angriffspfad</span>
+        <h2>Von der Sample-Antwort zum Admin-Token</h2>
+      </div>
+      <div class="attack-steps">
+        <div class="astep">
+          <div class="astep-num">1</div>
+          <div class="astep-body">
+            <div class="astep-title">Sample beschaffen</div>
+            <div class="astep-desc">Ohne jede Vorbereitung, keine Secret-Kenntnis nötig:</div>
+            <div class="mono-block">java -jar vault.jar --sample
+→ message = "user=guest" (hex)
+→ mac     = SHA256(secret‖"user=guest")</div>
+          </div>
+        </div>
+        <div class="astep">
+          <div class="astep-num">2</div>
+          <div class="astep-body">
+            <div class="astep-title">Secret-Länge schätzen</div>
+            <div class="astep-desc"><code>Crypto.f()</code> würde die Länge exakt verraten (<code>rotateRight(rotateLeft(n,3),3) == n</code>, reine Tarnung), ist aber im CLI-Pfad nie aufrufbar. Also: kleiner Scanbereich plausibler Längen (z.B. 0&ndash;64 Byte) &mdash; kein Brute-Force auf den MAC, nur auf eine kleine Ganzzahl.</div>
+          </div>
+        </div>
+        <div class="astep">
+          <div class="astep-num">3</div>
+          <div class="astep-body">
+            <div class="astep-title">Hash-State aus dem MAC rekonstruieren</div>
+            <div class="astep-desc">Die 64 Hex-Zeichen des MAC sind die acht 32-Bit-Worte des SHA-256-Zustands nach dem letzten Block. Eine eigene SHA-256-Kernroutine, mit diesem Zustand statt der Standard-IV initialisiert, kann von dort aus weiterrechnen.</div>
+          </div>
+        </div>
+        <div class="astep">
+          <div class="astep-num">4</div>
+          <div class="astep-body">
+            <div class="astep-title">Padding einfügen, Suffix anhängen</div>
+            <div class="astep-desc">Für jede geratene Secret-Länge <code>L</code>: das SHA-256-Padding von <code>secret‖message</code> (Länge <code>L + len(message)</code>) korrekt berechnen, dann <code>&amp;user=admin</code> als neuen Block verarbeiten.</div>
+            <div class="mono-block">forged_message = message ‖ padding(L + len(message)) ‖ "&user=admin"
+forged_mac     = weiterberechneter Hash-Zustand als Hex</div>
+          </div>
+        </div>
+        <div class="astep">
+          <div class="astep-num">5</div>
+          <div class="astep-body">
+            <div class="astep-title">Gegen die echte JAR testen</div>
+            <div class="astep-desc">Alle Kandidaten aus Schritt 2 durchprobieren, bis einer <code>Access granted.</code> liefert. Die MAC-Werte selbst sind für jede Länge deterministisch vorausberechnet &mdash; es wird nur die <em>Länge</em> geraten, nicht der kryptographische Teil.</div>
+            <div class="mono-block">java -jar vault.jar &lt;forged_hex&gt; &lt;forged_mac&gt;
+→ Access granted.
+→ FLAG{h4sh_l3ngth_3xt3ns10n_pwn3d}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <span class="section-num">Der Nebenweg</span>
+        <h2>Secret direkt aus dem Bytecode extrahieren</h2>
+        <p class="lede">Bei einer rein lokal, offline lauffähigen JAR muss jedes Geheimnis, das das Programm selbst braucht, irgendwo in der Datei liegen &mdash; das lässt sich durch Verschleierung verzögern, aber nicht grundsätzlich verhindern.</p>
+      </div>
+      <div class="attack-steps">
+        <div class="astep">
+          <div class="astep-num">1</div>
+          <div class="astep-body">
+            <div class="astep-title">Loader-Schlüssel rekonstruieren</div>
+            <div class="astep-desc"><code>javap -c -p -v</code> auf <code>Main.class</code>/<code>Main$a.class</code> + Manifest lesen &rarr; vier Fragmente, per SHA-256 kombiniert (<code>_deriveKey</code> in Python nachbauen).</div>
+          </div>
+        </div>
+        <div class="astep">
+          <div class="astep-num">2</div>
+          <div class="astep-body">
+            <div class="astep-title"><code>Crypto.class.encrypted</code> entschlüsseln</div>
+            <div class="astep-desc">Byte-Reverse + XOR mit dem berechneten Schlüssel &mdash; der Algorithmus liegt unverschlüsselt im Loader-Code direkt daneben.</div>
+          </div>
+        </div>
+        <div class="astep">
+          <div class="astep-num">3</div>
+          <div class="astep-body">
+            <div class="astep-title">Secret-Fragmente auslesen und kombinieren</div>
+            <div class="astep-desc">Vier weitere Fragmente in <code>Crypto.class</code>, ebenfalls per SHA-256 verdichtet &rarr; das eingebettete Secret liegt im Klartext vor.</div>
+          </div>
+        </div>
+        <div class="astep">
+          <div class="astep-num">4</div>
+          <div class="astep-body">
+            <div class="astep-title">Eigenen, regulären MAC berechnen</div>
+            <div class="astep-desc">Mit dem bekannten Secret braucht es <strong>keine</strong> Length-Extension mehr &mdash; ein normaler <code>SHA256(secret‖"user=admin")</code> reicht, und die JAR akzeptiert ihn genauso.</div>
+            <div class="mono-block">java -jar vault.jar &lt;hex "user=admin"&gt; &lt;regulärer mac&gt;
+→ Access granted.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <span class="section-num">Bilanz</span>
+        <h2>Was hält einer ernsthaften Analyse stand &mdash; was nicht</h2>
+      </div>
+      <div class="ledger">
+        <div class="ledger-row head">
+          <div>Barriere</div>
+          <div>Status</div>
+          <div>Warum</div>
+        </div>
+        <div class="ledger-row">
+          <div class="ledger-item">String-/Namensobfuskierung<span class="file">ProGuard, alle Klassen</span></div>
+          <div><span class="status-pill weak">verzögert</span></div>
+          <div class="ledger-detail">Automatisiert und Standard-Tooling &mdash; erschwert das Lesen, kein struktureller Schutz.</div>
+        </div>
+        <div class="ledger-row">
+          <div class="ledger-item">Verteilter Loader-/Secret-Schlüssel<span class="file">Main.java, VersionInfo.java, RuntimeTag.java</span></div>
+          <div><span class="status-pill weak">verzögert</span></div>
+          <div class="ledger-detail">Alle Fragmente liegen offen in derselben JAR, die entschlüsselt werden soll. Erhöht den Leseaufwand, nicht die Sicherheit.</div>
+        </div>
+        <div class="ledger-row">
+          <div class="ledger-item">Secret-Prefix-MAC<span class="file">Crypto.a()</span></div>
+          <div><span class="status-pill solid">echter Bruch</span></div>
+          <div class="ledger-detail">Kryptographisch fundiert angreifbar (Hash-Length-Extension) &mdash; das ist der beabsichtigte Lernkern der Aufgabe.</div>
+        </div>
+        <div class="ledger-row">
+          <div class="ledger-item">Flag-Kodierung<span class="file">Crypto.c(), Keystream aus SHA256(secret‖"vault-flag")</span></div>
+          <div><span class="status-pill weak">Nebenweg</span></div>
+          <div class="ledger-detail">Nicht mehr per festem XOR lesbar, hängt aber vom selben extrahierbaren Secret ab wie oben.</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <span class="section-num">Der eigentliche Fix</span>
+        <h2>Wie man das MAC-Schema tatsächlich repariert</h2>
+      </div>
+      <div class="fixes">
+        <div class="fix">
+          <div class="fix-num">1</div>
+          <div>
+            <h4>HMAC-SHA256 statt Secret-Prefix-Hash</h4>
+            <p><code>HMAC(secret, message)</code> ist durch die doppelte Hash-Verschachtelung (inner/outer Padding, RFC 2104) konstruktiv gegen Length-Extension immun &mdash; kein Verschleierungs-Trick, sondern ein echter Fix.</p>
+          </div>
+        </div>
+        <div class="fix">
+          <div class="fix-num">2</div>
+          <div>
+            <h4>Alternativ: SHA-3/Keccak</h4>
+            <p>Sponge-Konstruktion statt Merkle&ndash;Damgaard &mdash; selbst ein naives <code>SHA3(secret‖message)</code> ist nicht von Haus aus length-extension-anfällig.</p>
+          </div>
+        </div>
+        <div class="fix">
+          <div class="fix-num">3</div>
+          <div>
+            <h4>Strengeres Rollen-Parsing</h4>
+            <p>Doppelte <code>user=</code>-Keys als Fehler behandeln statt stillschweigend zu überschreiben &mdash; Verteidigung in der Tiefe, behebt aber nicht die Hash-Schwäche selbst.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <span class="section-num">Zusammenfassung</span>
+        <h2>Zwei Wege zur Flag, ein Lernziel</h2>
+      </div>
+      <div class="compare">
+        <div class="compare-card">
+          <h3>Hash-Length-Extension (beabsichtigt)</h3>
+          <ul>
+            <li>Keine Kenntnis von Secret oder Flag-Interna nötig</li>
+            <li>Erfordert Verständnis von SHA-256-Padding und -Zustand</li>
+            <li>Funktioniert allein über öffentlich sichtbares Verhalten (<code>--sample</code>)</li>
+            <li>Der einzige Weg, der ganz ohne Bytecode-Reversing von <code>Crypto</code> auskommt</li>
+          </ul>
+        </div>
+        <div class="compare-card">
+          <h3>Secret-Extraktion (Nebenweg)</h3>
+          <ul>
+            <li>Erfordert vollständiges Entschlüsseln von <code>Crypto.class</code></li>
+            <li>Erfordert Kombination von acht Schlüsselfragmenten über zwei Klassen</li>
+            <li>Kein Kryptografie-Wissen über Hash-Interna nötig, nur sorgfältiges Bytecode-Lesen</li>
+            <li>Bleibt bei reiner Offline-Verteilung strukturell nicht vollständig verhinderbar</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <footer>
+    vault.jar &middot; de.dhbw.ctf &middot; Stand: harden-reversing-proguard
+  </footer>
+
+</div>
+
+<script>
+function selectTab(n) {
+  for (const i of [1, 2]) {
+    const panel = document.getElementById('tab-' + i);
+    const btn = document.getElementById('tab-btn-' + i);
+    const active = i === n;
+    panel.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  }
+  try { sessionStorage.setItem('vaultTab', String(n)); } catch (e) {}
+}
+
+(function () {
+  try {
+    const saved = sessionStorage.getItem('vaultTab');
+    if (saved === '2') selectTab(2);
+  } catch (e) {}
+})();
+</script>
+
+</body>
+</html>

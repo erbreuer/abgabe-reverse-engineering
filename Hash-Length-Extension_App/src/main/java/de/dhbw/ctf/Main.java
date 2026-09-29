@@ -3,27 +3,46 @@ package de.dhbw.ctf;
 import java.io.InputStream;
 import java.lang.reflect.Method;
 
+// Einstiegspunkt (JAR-Manifest: Main-Class). Main lädt Crypto niemals per
+// normalem "import"/Compile-Zeit-Referenz, sondern ausschließlich über den
+// EncryptedClassLoader + Reflection (siehe main() unten) — das verhindert,
+// dass ein Standard-Decompiler den Aufruf klar als "Main benutzt Crypto"
+// anzeigt, und erzwingt, dass Crypto erst entschlüsselt werden muss, bevor
+// irgendeine seiner Methoden aufrufbar ist.
 public class Main {
 
-    // "de.dhbw.ctf.Crypto" XOR 0x5A
+    // Klassenname "de.dhbw.ctf.Crypto", byteweise mit 0x5A ge-XOR-t, damit
+    // er nicht im Klartext im Konstanten-Pool steht (z.B. `strings vault.jar`
+    // würde ihn sonst direkt zeigen). Wird von _s() zur Laufzeit dekodiert.
     private static final byte[] _C = {0x3e,0x3f,0x74,0x3e,0x32,0x38,0x2d,0x74,0x39,0x2e,0x3c,0x74,0x19,0x28,0x23,0x2a,0x2e,0x35};
 
-    // Methodennamen XOR 0x5A: a,b,c,d,e,f
+    // Methodennamen von Crypto, einzeln XOR 0x5A kodiert (a,b,c,d,e,f) —
+    // damit dieselbe Verschleierung wie bei _C auch für die per Reflection
+    // aufgerufenen Methodennamen gilt. Reihenfolge entspricht Crypto:
+    // a=computeMac, b=extractRole, c=getFlag, d=getSampleMessage,
+    // e=getSampleMac, f=getSecretLength (im CLI-Pfad nie aufgerufen).
     private static final byte[] _Ma = {0x3b};
     private static final byte[] _Mb = {0x38};
     private static final byte[] _Mc = {0x39};
     private static final byte[] _Md = {0x3e};
     private static final byte[] _Me = {0x3f};
-
-    // Methodenname "f" XOR 0x5A
     private static final byte[] _Mf = {0x3c};
 
+    // Kehrt die XOR-0x5A-Kodierung von _C/_Ma.._Mf wieder in Klartext um.
     private static String _s(byte[] b) {
         byte[] r = new byte[b.length];
         for (int i = 0; i < b.length; i++) r[i] = (byte) (b[i] ^ 0x5A);
         return new String(r, java.nio.charset.StandardCharsets.UTF_8);
     }
 
+    // Eigener ClassLoader, der KEINE normale .class-Datei aus dem JAR
+    // lädt, sondern <name>.class.encrypted liest, sie mit _d()/_key()
+    // entschlüsselt und das Ergebnis per defineClass() direkt der JVM
+    // übergibt. Das ist die "Verschlüsselung", die Crypto.class im JAR
+    // versteckt (in Wahrheit reversibles Byte-Reverse+XOR ohne echtes
+    // Geheimnis-Derivat, siehe _d() unten — die Sicherheit hängt allein
+    // daran, wie schwer _key() zu rekonstruieren ist).
+    //
     // Public (nicht paketsichtbar), da Crypto._secret() _key() aufruft,
     // nachdem Crypto selbst schon über diesen Loader geladen wurde —
     // Zugriffe über Loader-Grenzen hinweg zählen als unterschiedliche
@@ -32,6 +51,8 @@ public class Main {
 
         public EncryptedClassLoader(ClassLoader parent) { super(parent); }
 
+        // Wird von der JVM aufgerufen, wenn loadClass() die angeforderte
+        // Klasse nicht bereits über den Eltern-ClassLoader findet.
         @Override
         protected Class<?> findClass(String name) throws ClassNotFoundException {
             String path = name.replace('.', '/') + ".class.encrypted";
@@ -97,6 +118,12 @@ public class Main {
             }
         }
 
+        // "Entschlüsselung" von Crypto.class.encrypted: Array-Reverse
+        // (Byte i <-> Byte n-1-i) kombiniert mit XOR(key) auf jedem Byte.
+        // Selbstinvers — _d(_d(x,k),k) == x — build.sh nutzt exakt dieselbe
+        // Operation, um die Klartext-Klasse vor dem Packen zu "verschlüsseln".
+        // Keine echte Kryptografie: ohne Ableitung aus einem echten Geheimnis
+        // ist das reversibel, sobald key bekannt ist (siehe _key() oben).
         private static byte[] _d(byte[] data, int key) {
             byte[] r = data.clone();
             int n = r.length;
@@ -112,6 +139,7 @@ public class Main {
     }
 
     // --- internal validation ---
+    // Toter Code, wird von main() nie aufgerufen — reine Ablenkung.
     private static boolean _chk(String s) {
         if (s == null || s.length() < 4) return false;
         int acc = ~(((int) Math.PI ^ Integer.MAX_VALUE >> 16) + Short.MAX_VALUE);
@@ -125,9 +153,14 @@ public class Main {
             return;
         }
 
+        // Löst Crypto ausschließlich über den EncryptedClassLoader auf —
+        // die JVM kennt die Klasse vor diesem Punkt nicht, defineClass()
+        // im Loader macht sie erst hier verfügbar.
         EncryptedClassLoader loader = new EncryptedClassLoader(Main.class.getClassLoader());
         Class<?> crypto = loader.loadClass(_s(_C));
 
+        // --sample: gibt eine gültige Beispiel-Nachricht + ihren MAC aus,
+        // ohne Rollenprüfung — Ausgangspunkt für den Length-Extension-Angriff.
         if (args[0].equals("--sample")) {
             String msg = (String) crypto.getMethod(_s(_Md)).invoke(null);
             String mac = (String) crypto.getMethod(_s(_Me)).invoke(null);
@@ -157,6 +190,11 @@ public class Main {
         Method mExtractRole = crypto.getMethod(_s(_Mb), byte[].class);
         Method mGetFlag     = crypto.getMethod(_s(_Mc));
 
+        // Kernprüfung: Server berechnet den MAC selbst aus der
+        // eingereichten messageBytes und vergleicht ihn mit dem
+        // übergebenen. Akzeptiert JEDE Nachricht, für die der Aufrufer
+        // einen passenden MAC liefert — inklusive einer per
+        // Hash-Length-Extension aus der --sample-Ausgabe gefälschten.
         String expectedMac = (String) mComputeMac.invoke(null, (Object) messageBytes);
 
         if (!expectedMac.equalsIgnoreCase(inputMac)) {
@@ -164,6 +202,11 @@ public class Main {
             System.exit(1);
         }
 
+        // Rollenprüfung NACH der MAC-Prüfung: sobald der MAC passt, wird
+        // b() auf dieselben messageBytes angewendet und deren letztes
+        // "user="-Feld gewinnt — auch wenn diese Bytes durch Length-
+        // Extension um ein zweites, gefälschtes "&user=admin" verlängert
+        // wurden.
         String role = (String) mExtractRole.invoke(null, (Object) messageBytes);
 
         if ("admin".equals(role)) {
