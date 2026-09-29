@@ -21,6 +21,20 @@
 -outjars      target/obfuscated/crypto
 -libraryjars  <java.home>/jmods/java.base.jmod(!**.jar;!module-info.class)
 
+# Crypto._secret() ruft Main.EncryptedClassLoader._key() direkt auf
+# (Compile-Zeit-Referenz, kein Reflection). Main und VersionInfo werden
+# schon von main.pro obfuskiert und landen von dort im finalen JAR — hier
+# nur als Library nötig, damit ProGuard die Referenz aus Crypto auflösen
+# kann, ohne die Klassen ein zweites Mal auszugeben.
+-libraryjars  target/classes(de/dhbw/ctf/VersionInfo.class,de/dhbw/ctf/RuntimeTag.class,de/dhbw/ctf/Main.class,de/dhbw/ctf/Main$EncryptedClassLoader.class)
+
+# main.pro muss vor diesem Durchgang laufen (siehe dort, -printmapping).
+# Ohne -applymapping würde Crypto.class weiterhin die unobfuskierten
+# Namen Main/Main$EncryptedClassLoader referenzieren, die im fertigen JAR
+# gar nicht mehr existieren (dort heißen sie z.B. Main/Main$a) —
+# NoClassDefFoundError zur Laufzeit.
+-applymapping target/main-mapping.txt
+
 -keep public class de.dhbw.ctf.Crypto {
     public static java.lang.String a(byte[]);
     public static java.lang.String b(byte[]);

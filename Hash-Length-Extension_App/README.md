@@ -24,12 +24,15 @@ Erzeugt `target/vault.jar`.
 
 ## Verwendung
 
-Die Anwendung erwartet die Nachricht als **Hex-String** (kein Klartext).
+Die Anwendung erwartet die Nachricht als **Hex-String** (kein Klartext). Das
+Secret ist fest in der JAR eingebettet (verteilt über mehrere Fragmente,
+siehe [LOESUNG.md](LOESUNG.md)) — es muss **keine** Umgebungsvariable mehr
+gesetzt werden.
 
 ```
-VAULT_SECRET=<secret> java -jar target/vault.jar <message-hex> <mac>
-VAULT_SECRET=<secret> java -jar target/vault.jar --sample
-VAULT_SECRET=<secret> java -jar target/vault.jar --help
+java -jar target/vault.jar <message-hex> <mac>
+java -jar target/vault.jar --sample
+java -jar target/vault.jar --help
 ```
 
 ### Argumente
@@ -41,21 +44,19 @@ VAULT_SECRET=<secret> java -jar target/vault.jar --help
 | `--sample` | Gibt eine gültige Beispiel-Nachricht (hex) mit MAC aus |
 | `--help` | Zeigt die Hilfe |
 
-Die Umgebungsvariable `VAULT_SECRET` muss beim Start gesetzt sein.
-
 ### Beispiele
 
 ```bash
 # Startpunkt: gültige Werte anzeigen
-VAULT_SECRET=s3cr3t\!X java -jar target/vault.jar --sample
+java -jar target/vault.jar --sample
 
 # Zugriff mit gültigem Token (gibt "Access denied. You are: guest")
-VAULT_SECRET=s3cr3t\!X java -jar target/vault.jar \
+java -jar target/vault.jar \
     757365723d6775657374 \
-    24af60bad400dee40dee5745738a122f2af594f7680d1a63002043389f8c7a6b
+    2c38fd78f54e6c582f5b87421920e2501405c1d11a7c77eabd537409d18ce938
 
 # Ungültiger MAC
-VAULT_SECRET=s3cr3t\!X java -jar target/vault.jar \
+java -jar target/vault.jar \
     757365723d6775657374 wrongmac
 ```
 
@@ -65,12 +66,13 @@ VAULT_SECRET=s3cr3t\!X java -jar target/vault.jar \
 Hash-Length-Extension_App/
 ├── src/main/java/de/dhbw/ctf/
 │   ├── Main.java          # Einstiegspunkt + EncryptedClassLoader
-│   ├── Crypto.java        # MAC-Logik (wird verschlüsselt ins JAR gepackt)
-│   └── VersionInfo.java   # Drittes Fragment des Loader-Schlüssels
+│   ├── Crypto.java        # MAC-Logik + eingebettetes Secret (wird verschlüsselt ins JAR gepackt)
+│   ├── VersionInfo.java   # Schlüsselfragment des Loaders
+│   └── RuntimeTag.java    # Weitere Schlüsselfragmente (Loader + Secret)
 ├── proguard/
 │   ├── crypto.pro         # ProGuard-Config für Crypto.class
 │   └── main.pro           # ProGuard-Config für Main.class + EncryptedClassLoader
-├── build.sh               # Build-Script (javac → ProGuard → XOR-Verschlüsselung → jar)
+├── build.sh               # Build-Script (javac → ProGuard → Hash-Key-Verschlüsselung → jar)
 ├── AUFGABE.md             # Aufgabenstellung für Schüler
 ├── README.md              # Diese Datei (Nutzerdokumentation)
 ├── LOESUNG.md             # RE-Dokumentation (Schwachstelle + Lösungsweg)

@@ -24,9 +24,13 @@ public class Main {
         return new String(r, java.nio.charset.StandardCharsets.UTF_8);
     }
 
-    static class EncryptedClassLoader extends ClassLoader {
+    // Public (nicht paketsichtbar), da Crypto._secret() _key() aufruft,
+    // nachdem Crypto selbst schon über diesen Loader geladen wurde —
+    // Zugriffe über Loader-Grenzen hinweg zählen als unterschiedliche
+    // Runtime-Packages, auch bei gleichem Java-Package-Namen.
+    public static class EncryptedClassLoader extends ClassLoader {
 
-        EncryptedClassLoader(ClassLoader parent) { super(parent); }
+        public EncryptedClassLoader(ClassLoader parent) { super(parent); }
 
         @Override
         protected Class<?> findClass(String name) throws ClassNotFoundException {
@@ -46,13 +50,38 @@ public class Main {
         // Lokaler Anteil des Schlüssels.
         private static final int _K1 = 0x2C;
 
-        // Der vollständige Schlüssel setzt sich aus drei getrennt liegenden
+        // Der vollständige Schlüssel setzt sich aus vier getrennt liegenden
         // Anteilen zusammen: dieser Konstante, einem Manifest-Attribut
-        // (build.sh setzt es beim Packen) und VersionInfo.BUILD_TAG.
-        private static int _key() {
+        // (build.sh setzt es beim Packen), VersionInfo.BUILD_TAG und
+        // RuntimeTag.SESSION_TAG. Statt die Anteile nur zu XOR-en, werden
+        // sie über SHA-256 zu einem Schlüssel verdichtet — wer nicht alle
+        // vier Fragmente korrekt kombiniert, bekommt einen komplett
+        // anderen Schlüssel, kein teilweise entschlüsseltes Ergebnis.
+        // Public (nicht private), da Crypto._secret() diesen Wert ebenfalls
+        // einbezieht (siehe dort) — koppelt die beiden separat
+        // verschleierten Klassen, statt sie unabhängig lösbar zu lassen.
+        // ProGuard behandelt Member paketsichtbarer Library-Klassen sonst
+        // als nicht referenzierbar (siehe crypto.pro).
+        public static int _key() {
             int k2 = _manifestTag();
             int k3 = VersionInfo.BUILD_TAG;
-            return _K1 ^ k2 ^ k3;
+            int k4 = RuntimeTag.SESSION_TAG;
+            return _deriveKey(_K1, k2, k3, k4);
+        }
+
+        // Public aus demselben Grund wie _key() oben: Crypto._secret()
+        // ruft dies direkt auf.
+        public static int _deriveKey(int a, int b, int c, int d) {
+            try {
+                java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+                java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(16);
+                buf.putInt(a).putInt(b).putInt(c).putInt(d);
+                byte[] hash = md.digest(buf.array());
+                return ((hash[0] & 0xFF) << 24) | ((hash[1] & 0xFF) << 16)
+                     | ((hash[2] & 0xFF) << 8)  |  (hash[3] & 0xFF);
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
         }
 
         private static int _manifestTag() {
@@ -98,18 +127,6 @@ public class Main {
 
         EncryptedClassLoader loader = new EncryptedClassLoader(Main.class.getClassLoader());
         Class<?> crypto = loader.loadClass(_s(_C));
-
-        // Trigger early ENV check — f() calls _secret() which throws if VAULT_SECRET is unset
-        try {
-            crypto.getMethod(_s(_Mf)).invoke(null);
-        } catch (java.lang.reflect.InvocationTargetException e) {
-            Throwable cause = e.getCause();
-            if (cause != null && cause.getMessage() != null && cause.getMessage().contains("VAULT_SECRET")) {
-                System.err.println("Error: VAULT_SECRET environment variable not set.");
-                System.exit(1);
-            }
-            throw e;
-        }
 
         if (args[0].equals("--sample")) {
             String msg = (String) crypto.getMethod(_s(_Md)).invoke(null);

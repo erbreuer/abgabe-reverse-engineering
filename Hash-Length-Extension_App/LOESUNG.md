@@ -11,13 +11,14 @@ akzeptiert wird — **ohne das Secret zu kennen**.
 ## Schritt 1: JAR erkunden
 
 ```bash
-VAULT_SECRET=s3cr3t\!X java -jar vault.jar --sample
+java -jar vault.jar --sample
 ```
 
-Ausgabe:
+Keine Umgebungsvariable nötig — das Secret ist fest in der JAR eingebettet
+(dazu mehr in Schritt 4). Ausgabe:
 ```
 Sample message (hex) : 757365723d6775657374
-Sample MAC           : 24af60bad400dee40dee5745738a122f2af594f7680d1a63002043389f8c7a6b
+Sample MAC           : 2c38fd78f54e6c582f5b87421920e2501405c1d11a7c77eabd537409d18ce938
 ```
 
 `757365723d6775657374` ist die Hex-Kodierung von `user=guest`.
@@ -59,22 +60,45 @@ Source-Code benannt, im JAR selbst sind sie umbenannt):
 **`EncryptedClassLoader.findClass()`** lädt `Crypto.class.encrypted` und ruft
 eine Entschlüsselungsfunktion mit einem zusammengesetzten Schlüssel auf.
 
-**Der Schlüssel besteht aus drei getrennt liegenden Anteilen** (nicht mehr
-einer einzelnen Konstante):
+**Der Schlüssel besteht aus vier getrennt liegenden Anteilen**, die über
+SHA-256 zu einem Schlüssel verdichtet werden (nicht mehr per XOR verknüpft):
 ```java
 private static final int _K1 = 0x2C;                  // in Main.class
 
-private static int _key() {
+public static int _key() {
     int k2 = _manifestTag();                           // aus MANIFEST.MF: X-Build-Tag
     int k3 = VersionInfo.BUILD_TAG;                     // aus VersionInfo.class
-    return _K1 ^ k2 ^ k3;
+    int k4 = RuntimeTag.SESSION_TAG;                    // aus RuntimeTag.class
+    return _deriveKey(_K1, k2, k3, k4);
+}
+
+public static int _deriveKey(int a, int b, int c, int d) {
+    MessageDigest md = MessageDigest.getInstance("SHA-256");
+    ByteBuffer buf = ByteBuffer.allocate(16);
+    buf.putInt(a).putInt(b).putInt(c).putInt(d);
+    byte[] hash = md.digest(buf.array());
+    return ((hash[0] & 0xFF) << 24) | ((hash[1] & 0xFF) << 16)
+         | ((hash[2] & 0xFF) << 8)  |  (hash[3] & 0xFF);
 }
 ```
-Alle drei Fundstellen müssen zusammengeführt werden, um den vollständigen
-Schlüssel (`136 = 0x88`) zu erhalten:
+Alle vier Fundstellen müssen exakt korrekt kombiniert werden, um den
+vollständigen Schlüssel zu erhalten (aktuell: `_K1=44`, `X-Build-Tag=81`,
+`VersionInfo.BUILD_TAG=245`, `RuntimeTag.SESSION_TAG=197` →
+`_deriveKey(...) & 0xFF = 145`):
 - `_K1` steht im Bytecode von `Main$EncryptedClassLoader`
 - `X-Build-Tag` steht im JAR-Manifest (`unzip -p vault.jar META-INF/MANIFEST.MF`)
 - `VersionInfo.BUILD_TAG` steht in einer eigenen, unscheinbar benannten Klasse
+- `RuntimeTag.SESSION_TAG` steht in einer weiteren, unscheinbar benannten Klasse
+
+**Wichtig:** Der Java-Compiler faltet reine Compile-Zeit-Konstanten
+(`static final int`) automatisch zusammen, wenn sie direkt verrechnet
+werden — bei einem naiven XOR aus nur Literalen verschmelzen mehrere
+Fragmente unbemerkt zu einer einzigen Zahl im Bytecode. Die
+`_deriveKey()`-Indirektion über einen echten Methodenaufruf verhindert das:
+alle vier Operanden bleiben als eigenständige `invokestatic`/Literal-Werte
+im Bytecode sichtbar, keiner verschwindet durch Compiler-Optimierung.
+`(byte) (x ^ key)` in `_d()`/`_secret()` verwendet nur das niedrigste Byte
+von `key` — beim manuellen Nachrechnen reicht `key & 0xFF`.
 
 **Die Entschlüsselungsfunktion selbst** (Byte-Tausch + XOR, unverändert):
 ```java
@@ -100,21 +124,31 @@ zusammengesetzten Schlüssel XOR'n. Die Operation ist **selbstinvers** —
 
 ## Schritt 3: Crypto.class entschlüsseln
 
-Der Schlüssel `0x88` muss zuerst aus den drei Anteilen aus Schritt 2
-rekonstruiert werden (`_K1 ^ X-Build-Tag ^ VersionInfo.BUILD_TAG`), dann:
+Der Schlüssel muss zuerst aus den vier Anteilen aus Schritt 2 rekonstruiert
+werden (`_deriveKey(_K1, X-Build-Tag, VersionInfo.BUILD_TAG,
+RuntimeTag.SESSION_TAG) & 0xFF`), dann:
 
 ```python
+import hashlib, struct
+
+def derive_key(a, b, c, d):
+    buf = struct.pack(">iiii", a, b, c, d)
+    h = hashlib.sha256(buf).digest()
+    return struct.unpack(">i", h[:4])[0]
+
+key = derive_key(44, 81, 245, 197) & 0xFF   # aktuell: 145
+
 with open('de/dhbw/ctf/Crypto.class.encrypted', 'rb') as f:
     data = bytearray(f.read())
 
 n = len(data)
 for i in range(n // 2):
     a, b = data[i], data[n - 1 - i]
-    data[i]         = (b ^ 0x88) & 0xFF
-    data[n - 1 - i] = (a ^ 0x88) & 0xFF
+    data[i]         = (b ^ key) & 0xFF
+    data[n - 1 - i] = (a ^ key) & 0xFF
 
 if n % 2 == 1:
-    data[n // 2] = (data[n // 2] ^ 0x88) & 0xFF
+    data[n // 2] = (data[n // 2] ^ key) & 0xFF
 
 with open('/tmp/Crypto.class', 'wb') as f:
     f.write(data)
@@ -141,8 +175,18 @@ Reflection mit Namen aufruft. Sichtbar im dekompilierten Code (Namen hier zur
 Lesbarkeit wie im Source benannt):
 
 ```java
-// Secret kommt aus der Umgebungsvariable VAULT_SECRET — nicht im JAR gespeichert
-private static final String _ENV = System.getenv("VAULT_SECRET");
+// Secret ist fest in der JAR eingebettet (nicht mehr aus VAULT_SECRET),
+// XOR-kodiert mit einem aus vier Fragmenten (_deriveKey, siehe Schritt 2)
+// zusammengesetzten Schlüssel:
+private static final byte[] _S = { ... };
+
+private static byte[] _secret() {
+    int key = Main.EncryptedClassLoader._deriveKey(
+            _S1, _secretManifestTag(), Main.EncryptedClassLoader._key(), RuntimeTag.TRACE_TAG);
+    byte[] r = new byte[_S.length];
+    for (int i = 0; i < _S.length; i++) r[i] = (byte) (_S[i] ^ key);
+    return r;
+}
 
 // Secret-Länge verschleiert: Integer.rotateRight(Integer.rotateLeft(n, 3), 3) = n
 public static int f() { return Integer.rotateRight(Integer.rotateLeft(_secret().length, 3), 3); }
@@ -161,13 +205,16 @@ public static String b(byte[] m) {
     }
     ...
 }
+
+// Flag-Entschlüsselung: Keystream aus SHA256(secret || "vault-flag")
+public static String c() {
+    byte[] ks = _keystream(_F.length);   // wiederholtes SHA-256(block)
+    ...
+}
 ```
 
-**Die Secret-Länge** ermitteln — `f()` per Reflection aufrufen:
-```python
-# Oder: aus dem Bytecode ablesen — Math.exp(X) wobei X die Länge ist
-# Bei s3cr3t!X: Länge = 8
-```
+**Die Secret-Länge** ermitteln — `f()` per Reflection aufrufen, oder direkt
+über die im nächsten Absatz beschriebene vollständige Secret-Extraktion.
 
 **Die Schwachstelle:** `SHA256(secret || message)` statt HMAC.
 
@@ -177,6 +224,45 @@ kann `|| extra` anhängen ohne das Secret zu kennen.
 
 Außerdem sichtbar: `extractUser()` (Methode `b`) gibt das **letzte** `user=`-Feld
 zurück. D.h. `user=guest[padding]&user=admin` → Nutzer `admin`.
+
+### Alternativer Weg: Secret direkt extrahieren
+
+Da das Secret fest im JAR liegt (siehe oben), ist es **grundsätzlich
+extrahierbar** — das ist bei einer rein lokal, offline lauffähigen JAR ohne
+Servergrenze unvermeidbar (das Programm muss das Secret selbst lesen können,
+also muss es irgendwo in der Datei stehen, egal wie stark verschleiert).
+
+`_S1`, `X-Secret-Tag` (Manifest), `Main.EncryptedClassLoader._key()` und
+`RuntimeTag.TRACE_TAG` liefern die vier Fragmente für den Secret-Schlüssel
+(analog zu Schritt 3, `_deriveKey` statt XOR). Damit lässt sich `_S`
+entschlüsseln und man erhält das Secret im Klartext — z.B.:
+
+```python
+key = derive_key(_S1, x_secret_tag, loader_key, runtime_trace_tag) & 0xFF
+secret = bytes(b ^ key for b in S)
+```
+
+Mit dem Secret in der Hand kann man **ohne Length-Extension** einen eigenen,
+regulär berechneten `user=admin`-MAC bauen:
+
+```python
+import hashlib
+msg = b"user=admin"
+mac = hashlib.sha256(secret + msg).hexdigest()
+```
+
+```bash
+java -jar vault.jar 757365723d61646d696e <mac>
+# → Access granted. FLAG{...}
+```
+
+Dieser Weg umgeht den eigentlichen Kryptoangriff vollständig. Die Härtung
+(Hash-basierte Schlüsselableitung statt XOR, vier statt drei Fragmente,
+zusätzliche Klasse `RuntimeTag`, Flag-Entschlüsselung an das Secret
+gebunden statt fest kodiert) erhöht den dafür nötigen Aufwand deutlich
+gegenüber einer trivialen XOR-Verschleierung, macht ihn aber nicht
+unmöglich — er bleibt ein gültiger, nur aufwändigerer Lösungsweg neben dem
+Hash-Length-Extension-Angriff.
 
 ---
 
@@ -223,7 +309,7 @@ def sha256_pad(n):
 Die Nachricht wird als Hex-String übergeben — Null-Bytes im Padding sind kein Problem:
 
 ```bash
-VAULT_SECRET=s3cr3t\!X java -jar vault.jar <forged_hex> <forged_mac>
+java -jar vault.jar <forged_hex> <forged_mac>
 ```
 
 Ausgabe:
@@ -253,19 +339,24 @@ ist damit nicht möglich.
 
 | Schritt | Tool | Zweck |
 |---|---|---|
-| 1 | `java -jar vault.jar --sample` | Ausgangsdaten beschaffen |
-| 2 | `jar xf vault.jar` + `javap -p` / CFR | Entschlüsselungslogik + Schlüsselfragmente aus `Main.class` und `MANIFEST.MF` lesen (ProGuard-obfuskiert — Namen sind bedeutungslos, Struktur bleibt lesbar) |
-| 3 | Python-Script | `Crypto.class.encrypted` entschlüsseln (Schlüssel aus 3 Fragmenten zusammensetzen) |
-| 4 | CFR / javap -p | Schwachstelle `SHA256(secret\|\|msg)` + Secret-Länge ermitteln (auch hier: öffentliche Methoden `a`–`f` bleiben benannt, Rest ist obfuskiert) |
+| 1 | `java -jar vault.jar --sample` | Ausgangsdaten beschaffen (keine Env-Var nötig) |
+| 2 | `jar xf vault.jar` + `javap -p` / CFR | Entschlüsselungslogik + vier Schlüsselfragmente aus `Main.class`, `VersionInfo`/`RuntimeTag` und `MANIFEST.MF` lesen (ProGuard-obfuskiert — Namen sind bedeutungslos, Struktur bleibt lesbar) |
+| 3 | Python-Script | `Crypto.class.encrypted` entschlüsseln (Schlüssel per SHA-256 aus 4 Fragmenten ableiten, `_deriveKey` nachbauen) |
+| 4 | CFR / javap -p | Schwachstelle `SHA256(secret\|\|msg)` + Secret-Länge ermitteln (auch hier: öffentliche Methoden `a`–`f` bleiben benannt, Rest ist obfuskiert). Alternativ: Secret vollständig extrahieren (siehe oben) |
 | 5 | Python + `hlextend` | Hash verlängern, Flag holen |
 
 ## Build-Prozess (für Nachvollziehbarkeit)
 
-Seit der Härtung läuft `build.sh` in 7 statt 4 Schritten: Nach dem Kompilieren
-von `Crypto.java` bzw. `Main.java`/`VersionInfo.java` läuft jeweils ein
-ProGuard-Durchlauf (`proguard/crypto.pro`, `proguard/main.pro`), der private
-Bezeichner umbenennt und Debug-Infos entfernt — die öffentliche Struktur
-(Einstiegspunkt `main()`, die sechs reflektiv aufgerufenen `Crypto`-Methoden)
-bleibt zwingend erhalten. Die XOR-Verschlüsselung von `Crypto.class` läuft
-danach auf dem bereits obfuskierten ProGuard-Output. Details siehe
-`build.sh` und die Kommentare in `proguard/*.pro`.
+`build.sh` läuft in 8 Schritten: Zuerst berechnet ein Python-Vorverarbeitungsschritt
+das eingebettete Secret (`_S` in `Crypto.java`) und die keystream-verschlüsselte
+Flag (`_F`) neu, abhängig vom aktuellen Secret-Klartext (nur im Build-Skript,
+nicht ausgeliefert) und den Schlüsselfragmenten. Danach kompiliert `javac`
+`Main`, `VersionInfo`, `RuntimeTag` und `Crypto` in einem Durchgang (`Crypto`
+referenziert `Main.EncryptedClassLoader._key()`/`_deriveKey()` jetzt direkt).
+`main.pro` obfuskiert zuerst Main/VersionInfo/RuntimeTag und schreibt ein
+ProGuard-Mapping heraus, das `crypto.pro` per `-applymapping` übernimmt —
+sonst würde `Crypto.class` weiterhin die unobfuskierten Klassennamen
+referenzieren. Die "Verschlüsselung" von `Crypto.class` (Byte-Reverse + XOR)
+läuft danach mit dem tatsächlichen, Hash-abgeleiteten Loader-Key (nicht mehr
+einem festen Literal) auf dem bereits obfuskierten ProGuard-Output. Details
+siehe `build.sh` und die Kommentare in `proguard/*.pro`.
