@@ -122,6 +122,40 @@ public class Crypto {
         return r;
     }
 
+    // verifyDigestFormat: sekundäre Konsistenzprüfung, die NACH der
+    // eigentlichen MAC-Prüfung läuft und rein strukturell arbeitet (Länge/
+    // Zeichensatz/Bit-Invarianten), nicht inhaltlich gegen das Secret.
+    // Berechnet absichtlich SHA-256(m) OHNE secret (kein zweiter echter
+    // MAC) und vergleicht nur Form, nicht Inhalt, mit dem übergebenen mac.
+    // Für jede Eingabe, die diesen Punkt im Kontrollfluss von Main.main()
+    // erreicht (messageBytes bereits erfolgreich hex-dekodiert, mac bereits
+    // als 64-stelliger Hex-String durch a() erzeugt und akzeptiert), ist
+    // jede der drei Bedingungen unabhängig vom Inhalt erfüllt.
+    public static boolean g(byte[] m, String mac) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            String controlDigest = HexFormat.of().formatHex(md.digest(m));
+
+            if (controlDigest.length() != mac.length()) return false;
+
+            for (int i = 0; i < mac.length(); i++) {
+                char c = mac.charAt(i);
+                boolean isHex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                if (!isHex) return false;
+            }
+
+            // int hat exakt 32 Bits -> bitCount(...) liegt IMMER in [0,32].
+            // Sieht wie eine Plausibilitätsgrenze aus, ist aber eine
+            // mathematische Tautologie über jedem int-Wert.
+            int mixed = m.length ^ mac.length();
+            if (Integer.bitCount(mixed) > 32) return false;
+
+            return true;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     // getFlag
     public static String c() {
         byte[] ks = _keystream(_F.length);

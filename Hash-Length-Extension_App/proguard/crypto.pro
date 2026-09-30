@@ -42,6 +42,7 @@
     public static java.lang.String d();
     public static java.lang.String e();
     public static int f();
+    public static boolean g(byte[], java.lang.String);
 }
 
 # Kein Shrinking: die Injar enthält bereits nur die eine gewünschte Klasse

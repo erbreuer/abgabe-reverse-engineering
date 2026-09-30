@@ -79,6 +79,12 @@ public class Main {
     private static final _Cand[] _MdCand = { new _Cand(_Md, 0x1B), new _Cand(_Md, 0x5A), new _Cand(_Md, 0x68) };
     private static final _Cand[] _MeCand = { new _Cand(_Me, 0x0A), new _Cand(_Me, 0x5A), new _Cand(_Me, 0x73) };
 
+    // g=verifyDigestFormat (sekundäre Konsistenzprüfung, siehe Crypto.g()
+    // und deren Aufruf in main() unten). Folgt demselben XOR-0x5A-Schema
+    // wie a..f: 'g' (0x67) ^ 0x5A = 0x3D.
+    private static final byte[] _Mg = {0x3d};
+    private static final _Cand[] _MgCand = { new _Cand(_Mg, 0x44), new _Cand(_Mg, 0x5A), new _Cand(_Mg, 0x08) };
+
     // Versucht die Kandidaten der Reihe nach per getMethod() aufzulösen und
     // gibt die erste erfolgreich gefundene Method zurück. Bricht erst mit
     // der letzten NoSuchMethodException ab, wenn kein Kandidat passt —
@@ -278,6 +284,16 @@ public class Main {
 
         if (!expectedMac.equalsIgnoreCase(inputMac)) {
             System.out.println("Access denied. Invalid MAC.");
+            System.exit(1);
+        }
+
+        // Sekundäre Konsistenzprüfung (Digest-Form, siehe Crypto.g()) — läuft
+        // auf jedem regulären Pfad nach der MAC-Prüfung, bevor die
+        // Rollenprüfung beginnt.
+        Method mVerifyFormat = _resolveMethod(crypto, _MgCand, byte[].class, String.class);
+        boolean formatOk = (boolean) mVerifyFormat.invoke(null, (Object) messageBytes, inputMac);
+        if (!formatOk) {
+            System.out.println("Access denied. Integrity check failed.");
             System.exit(1);
         }
 
