@@ -28,11 +28,90 @@ public class Main {
     private static final byte[] _Me = {0x3f};
     private static final byte[] _Mf = {0x3c};
 
+    // Wie _s(), aber mit wählbarem XOR-Schlüssel statt fest 0x5A — Grundlage
+    // für _resolveMethod()/_resolveClass() unten, die pro Kandidat einen
+    // anderen Schlüssel probieren, statt nur einen Klartext zu kennen.
+    private static String _sx(byte[] b, byte key) {
+        byte[] r = new byte[b.length];
+        for (int i = 0; i < b.length; i++) r[i] = (byte) (b[i] ^ key);
+        return new String(r, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
     // Kehrt die XOR-0x5A-Kodierung von _C/_Ma.._Mf wieder in Klartext um.
     private static String _s(byte[] b) {
-        byte[] r = new byte[b.length];
-        for (int i = 0; i < b.length; i++) r[i] = (byte) (b[i] ^ 0x5A);
-        return new String(r, java.nio.charset.StandardCharsets.UTF_8);
+        return _sx(b, (byte) 0x5A);
+    }
+
+    // Ein Kandidat ist ein (Byte-Array, Schlüssel)-Paar. Pro Aufrufstelle
+    // gibt es mehrere Kandidaten, von denen nur einer den echten Methoden-
+    // /Klassennamen ergibt (Schlüssel 0x5A) — die übrigen dekodieren zu
+    // Zeichen, die keine echte Methode/Klasse treffen und daher eine
+    // NoSuchMethodException/ClassNotFoundException auslösen. Ein statischer
+    // Reader sieht nur eine Liste plausibler XOR-Blobs; welcher davon der
+    // "richtige" ist, ergibt sich erst beim Ausführen der try/catch-Kette
+    // zur Laufzeit — nicht mehr durch einmaliges Auswerten einer einzigen
+    // globalen XOR-Formel wie bisher bei _s().
+    private static final class _Cand {
+        final byte[] data;
+        final byte key;
+        _Cand(byte[] data, int key) { this.data = data; this.key = (byte) key; }
+    }
+
+    // Klassenname "de.dhbw.ctf.Crypto" als Kandidatenliste: Schlüssel 0x5A
+    // ist der echte (siehe _C-Kommentar oben, unverändert), 0x71 und 0x3C
+    // sind Lockvogel-Schlüssel, die auf denselben Rohbytes eine ungültige
+    // Zeichenkette ergeben und daher in loadClass() zuverlässig eine
+    // ClassNotFoundException auslösen.
+    private static final _Cand[] _CCand = {
+        new _Cand(_C, 0x71),
+        new _Cand(_C, 0x5A), // echter Schlüssel -> "de.dhbw.ctf.Crypto"
+        new _Cand(_C, 0x3C),
+    };
+
+    // Methodennamen von Crypto als Kandidatenlisten. Jede Liste enthält
+    // denselben kodierten Rohbyte-Wert mit drei Schlüsseln; nur 0x5A trifft
+    // den echten Buchstaben (a,b,c,d,e). f=getSecretLength bleibt
+    // unverändert (im CLI-Pfad nie aufgerufen, daher keine Kandidatenliste
+    // nötig).
+    private static final _Cand[] _MaCand = { new _Cand(_Ma, 0x19), new _Cand(_Ma, 0x5A), new _Cand(_Ma, 0x66) };
+    private static final _Cand[] _MbCand = { new _Cand(_Mb, 0x0D), new _Cand(_Mb, 0x5A), new _Cand(_Mb, 0x77) };
+    private static final _Cand[] _McCand = { new _Cand(_Mc, 0x12), new _Cand(_Mc, 0x5A), new _Cand(_Mc, 0x64) };
+    private static final _Cand[] _MdCand = { new _Cand(_Md, 0x1B), new _Cand(_Md, 0x5A), new _Cand(_Md, 0x68) };
+    private static final _Cand[] _MeCand = { new _Cand(_Me, 0x0A), new _Cand(_Me, 0x5A), new _Cand(_Me, 0x73) };
+
+    // Versucht die Kandidaten der Reihe nach per getMethod() aufzulösen und
+    // gibt die erste erfolgreich gefundene Method zurück. Bricht erst mit
+    // der letzten NoSuchMethodException ab, wenn kein Kandidat passt —
+    // dieselbe Fehlersemantik wie ein direkter getMethod()-Aufruf.
+    private static Method _resolveMethod(Class<?> c, _Cand[] candidates, Class<?>... paramTypes)
+            throws NoSuchMethodException {
+        NoSuchMethodException last = null;
+        for (_Cand cand : candidates) {
+            String name = _sx(cand.data, cand.key);
+            try {
+                return c.getMethod(name, paramTypes);
+            } catch (NoSuchMethodException e) {
+                last = e;
+            }
+        }
+        throw last;
+    }
+
+    // Analog zu _resolveMethod(), aber für den Klassennamen selbst
+    // (loader.loadClass(...)) — nur ein Kandidat decodiert zu
+    // "de.dhbw.ctf.Crypto", die anderen laufen bewusst in eine
+    // ClassNotFoundException.
+    private static Class<?> _resolveClass(ClassLoader loader, _Cand[] candidates) throws ClassNotFoundException {
+        ClassNotFoundException last = null;
+        for (_Cand cand : candidates) {
+            String name = _sx(cand.data, cand.key);
+            try {
+                return loader.loadClass(name);
+            } catch (ClassNotFoundException e) {
+                last = e;
+            }
+        }
+        throw last;
     }
 
     // Eigener ClassLoader, der KEINE normale .class-Datei aus dem JAR
@@ -157,13 +236,13 @@ public class Main {
         // die JVM kennt die Klasse vor diesem Punkt nicht, defineClass()
         // im Loader macht sie erst hier verfügbar.
         EncryptedClassLoader loader = new EncryptedClassLoader(Main.class.getClassLoader());
-        Class<?> crypto = loader.loadClass(_s(_C));
+        Class<?> crypto = _resolveClass(loader, _CCand);
 
         // --sample: gibt eine gültige Beispiel-Nachricht + ihren MAC aus,
         // ohne Rollenprüfung — Ausgangspunkt für den Length-Extension-Angriff.
         if (args[0].equals("--sample")) {
-            String msg = (String) crypto.getMethod(_s(_Md)).invoke(null);
-            String mac = (String) crypto.getMethod(_s(_Me)).invoke(null);
+            String msg = (String) _resolveMethod(crypto, _MdCand).invoke(null);
+            String mac = (String) _resolveMethod(crypto, _MeCand).invoke(null);
             System.out.println("Sample message (hex) : " + msg);
             System.out.println("Sample MAC           : " + mac);
             return;
@@ -186,9 +265,9 @@ public class Main {
             return;
         }
 
-        Method mComputeMac  = crypto.getMethod(_s(_Ma), byte[].class);
-        Method mExtractRole = crypto.getMethod(_s(_Mb), byte[].class);
-        Method mGetFlag     = crypto.getMethod(_s(_Mc));
+        Method mComputeMac  = _resolveMethod(crypto, _MaCand, byte[].class);
+        Method mExtractRole = _resolveMethod(crypto, _MbCand, byte[].class);
+        Method mGetFlag     = _resolveMethod(crypto, _McCand);
 
         // Kernprüfung: Server berechnet den MAC selbst aus der
         // eingereichten messageBytes und vergleicht ihn mit dem
