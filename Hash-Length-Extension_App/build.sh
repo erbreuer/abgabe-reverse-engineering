@@ -136,7 +136,7 @@ echo "[2/8] Compiling Main.java, VersionInfo.java and Crypto.java..."
 # (Compile-Zeit-Abhängigkeit) — alle drei Klassen müssen deshalb in einem
 # Durchgang kompiliert werden (Main.java selbst lädt Crypto weiterhin nur
 # reflektiv, das bleibt unverändert).
-javac -d "$BUILD" "$SRC/de/dhbw/ctf/VersionInfo.java" "$SRC/de/dhbw/ctf/RuntimeTag.java" "$SRC/de/dhbw/ctf/Main.java" "$SRC/de/dhbw/ctf/Crypto.java"
+javac -d "$BUILD" "$SRC/de/dhbw/ctf/VersionInfo.java" "$SRC/de/dhbw/ctf/RuntimeTag.java" "$SRC/de/dhbw/ctf/CacheLoader.java" "$SRC/de/dhbw/ctf/ConfigStore.java" "$SRC/de/dhbw/ctf/Main.java" "$SRC/de/dhbw/ctf/Crypto.java"
 
 echo "[3/8] Obfuscating Main.class with ProGuard..."
 # Muss vor crypto.pro laufen: schreibt das Umbenennungs-Mapping heraus,
@@ -189,7 +189,9 @@ rm -f "$BUILD/de/dhbw/ctf/Main.class" \
       "$BUILD/de/dhbw/ctf/Main\$EncryptedClassLoader.class" \
       "$BUILD/de/dhbw/ctf/Main\$_Cand.class" \
       "$BUILD/de/dhbw/ctf/VersionInfo.class" \
-      "$BUILD/de/dhbw/ctf/RuntimeTag.class"
+      "$BUILD/de/dhbw/ctf/RuntimeTag.class" \
+      "$BUILD/de/dhbw/ctf/CacheLoader.class" \
+      "$BUILD/de/dhbw/ctf/ConfigStore.class"
 
 echo "[7/8] Packaging JAR..."
 mkdir -p target

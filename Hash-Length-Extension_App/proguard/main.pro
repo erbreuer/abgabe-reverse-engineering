@@ -15,12 +15,29 @@
 # (ProGuard löst relative Pfade sonst relativ zur .pro-Datei selbst auf).
 -basedirectory ..
 
--injars       target/classes(de/dhbw/ctf/Main.class,de/dhbw/ctf/Main$EncryptedClassLoader.class,de/dhbw/ctf/Main$_Cand.class,de/dhbw/ctf/VersionInfo.class,de/dhbw/ctf/RuntimeTag.class)
+-injars       target/classes(de/dhbw/ctf/Main.class,de/dhbw/ctf/Main$EncryptedClassLoader.class,de/dhbw/ctf/Main$_Cand.class,de/dhbw/ctf/VersionInfo.class,de/dhbw/ctf/RuntimeTag.class,de/dhbw/ctf/CacheLoader.class,de/dhbw/ctf/ConfigStore.class)
 -outjars      target/obfuscated/main
 -libraryjars  <java.home>/jmods/java.base.jmod(!**.jar;!module-info.class)
 
 -keep public class de.dhbw.ctf.Main {
     public static void main(java.lang.String[]);
+}
+
+# CacheLoader/ConfigStore sind ladbare Decoy-Klassen für Main._CCand (siehe
+# dort): loadClass() muss sie unter ihrem exakten, im Quellcode als
+# XOR-kodierter Kandidat fest verdrahteten Namen finden können — ProGuard
+# darf ihre Klassennamen deshalb nicht umbenennen (anders als bei den
+# reinen Lockvogel-Schlüsseln auf _C, die absichtlich nie eine gültige
+# Klasse treffen). ConfigStore.a() muss ebenfalls exakt benannt bleiben,
+# da erst der Signaturvergleich (a() vs. a(byte[])) sie als falschen
+# Kandidaten entlarvt -- eine umbenannte Methode würde diesen Vergleich
+# gegenstandslos machen.
+-keep public class de.dhbw.ctf.CacheLoader {
+    public static java.lang.String status();
+}
+
+-keep public class de.dhbw.ctf.ConfigStore {
+    public static java.lang.String a();
 }
 
 # Crypto._secret() referenziert Main.EncryptedClassLoader._key() (siehe

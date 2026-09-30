@@ -57,14 +57,31 @@ public class Main {
         _Cand(byte[] data, int key) { this.data = data; this.key = (byte) key; }
     }
 
+    // Decoy-Klassennamen: "de.dhbw.ctf.CacheLoader" und
+    // "de.dhbw.ctf.ConfigStore", beide real im JAR vorhanden und daher über
+    // loadClass() erfolgreich ladbar — anders als die reinen
+    // Lockvogel-Schlüssel unten (0x71/0x3C auf denselben Rohbytes wie _C),
+    // die schon in loadClass() scheitern. Diese beiden Klassen laden
+    // erfolgreich, besitzen aber nicht die Methodensignaturen von Crypto
+    // (a(byte[]), b(byte[]), ...) — der Fehlschlag verschiebt sich von
+    // loadClass() auf das nachfolgende getMethod() in _resolveClass()
+    // unten. Wer nur prüft "welcher Kandidat lädt erfolgreich?" statt die
+    // komplette Aufrufkette inklusive Methodenauflösung zu verfolgen,
+    // landet hier beim falschen Kandidaten.
+    private static final byte[] _Cd1 = {0x43,0x42,0x09,0x43,0x4f,0x45,0x50,0x09,0x44,0x53,0x41,0x09,0x64,0x46,0x44,0x4f,0x42,0x6b,0x48,0x46,0x43,0x42,0x55};
+    private static final byte[] _Cd2 = {0x43,0x42,0x09,0x43,0x4f,0x45,0x50,0x09,0x44,0x53,0x41,0x09,0x64,0x48,0x49,0x41,0x4e,0x40,0x74,0x53,0x48,0x55,0x42};
+
     // Klassenname "de.dhbw.ctf.Crypto" als Kandidatenliste: Schlüssel 0x5A
     // ist der echte (siehe _C-Kommentar oben, unverändert), 0x71 und 0x3C
     // sind Lockvogel-Schlüssel, die auf denselben Rohbytes eine ungültige
     // Zeichenkette ergeben und daher in loadClass() zuverlässig eine
-    // ClassNotFoundException auslösen.
+    // ClassNotFoundException auslösen. _Cd1/_Cd2 (Schlüssel 0x27) sind
+    // echte, ladbare Decoy-Klassen — siehe Kommentar oben.
     private static final _Cand[] _CCand = {
         new _Cand(_C, 0x71),
-        new _Cand(_C, 0x5A), // echter Schlüssel -> "de.dhbw.ctf.Crypto"
+        new _Cand(_Cd1, 0x27), // lädt erfolgreich (CacheLoader), aber keine passende Methode
+        new _Cand(_C, 0x5A),   // echter Schlüssel -> "de.dhbw.ctf.Crypto"
+        new _Cand(_Cd2, 0x27), // lädt erfolgreich (ConfigStore), a() existiert mit falscher Signatur
         new _Cand(_C, 0x3C),
     };
 
@@ -104,20 +121,36 @@ public class Main {
     }
 
     // Analog zu _resolveMethod(), aber für den Klassennamen selbst
-    // (loader.loadClass(...)) — nur ein Kandidat decodiert zu
-    // "de.dhbw.ctf.Crypto", die anderen laufen bewusst in eine
-    // ClassNotFoundException.
-    private static Class<?> _resolveClass(ClassLoader loader, _Cand[] candidates) throws ClassNotFoundException {
+    // (loader.loadClass(...)). Ein Kandidat decodiert zu
+    // "de.dhbw.ctf.Crypto", zwei weitere (_Cd1/_Cd2) decodieren zu echten,
+    // ladbaren Klassen (CacheLoader/ConfigStore), die aber nicht die
+    // erwartete Methode besitzen — "lädt erfolgreich" reicht deshalb allein
+    // nicht als Kriterium. Erst wenn zusätzlich einer der
+    // verifyCandidates per getMethod(..., byte[].class) auf der geladenen
+    // Klasse trifft, gilt sie als aufgelöst; sonst wird der nächste
+    // Klassen-Kandidat probiert. Ohne diese Prüfung würde eine ladbare,
+    // aber falsche Decoy-Klasse hier fälschlich durchgehen und spätere
+    // getMethod()-Aufrufe zum Absturz bringen, statt weiterzusuchen.
+    private static Class<?> _resolveClass(ClassLoader loader, _Cand[] candidates, _Cand[] verifyCandidates)
+            throws ClassNotFoundException {
         ClassNotFoundException last = null;
         for (_Cand cand : candidates) {
             String name = _sx(cand.data, cand.key);
             try {
-                return loader.loadClass(name);
+                Class<?> c = loader.loadClass(name);
+                for (_Cand vcand : verifyCandidates) {
+                    try {
+                        c.getMethod(_sx(vcand.data, vcand.key), byte[].class);
+                        return c;
+                    } catch (NoSuchMethodException ignored) {
+                        // weitersuchen
+                    }
+                }
             } catch (ClassNotFoundException e) {
                 last = e;
             }
         }
-        throw last;
+        throw (last != null) ? last : new ClassNotFoundException("no candidate resolved");
     }
 
     // Eigener ClassLoader, der KEINE normale .class-Datei aus dem JAR
@@ -242,7 +275,7 @@ public class Main {
         // die JVM kennt die Klasse vor diesem Punkt nicht, defineClass()
         // im Loader macht sie erst hier verfügbar.
         EncryptedClassLoader loader = new EncryptedClassLoader(Main.class.getClassLoader());
-        Class<?> crypto = _resolveClass(loader, _CCand);
+        Class<?> crypto = _resolveClass(loader, _CCand, _MaCand);
 
         // --sample: gibt eine gültige Beispiel-Nachricht + ihren MAC aus,
         // ohne Rollenprüfung — Ausgangspunkt für den Length-Extension-Angriff.
