@@ -605,8 +605,8 @@ footer{
         <div class="call-row">
           <div class="call-num">2</div>
           <div>
-            <span class="call-code">EncryptedClassLoader loader = new EncryptedClassLoader(...);<br>Class&lt;?&gt; crypto = _resolveClass(loader, _CCand);</span>
-            <div class="call-desc"><code>_resolveClass()</code> probiert mehrere XOR-Schlüssel-Kandidaten auf denselben Rohbytes der Reihe nach per <code>loadClass()</code> durch &mdash; nur einer ergibt <code>"de.dhbw.ctf.Crypto"</code>, die übrigen laufen bewusst in eine <code>ClassNotFoundException</code>. Erst das erfolgreiche Laden löst <code>findClass()</code> aus &rarr; entschlüsselt <code>Crypto.class.encrypted</code> mit dem Loader-Schlüssel.</div>
+            <span class="call-code">EncryptedClassLoader loader = new EncryptedClassLoader(...);<br>Class&lt;?&gt; crypto = _resolveClass(loader, _CCand, _MaCand);</span>
+            <div class="call-desc"><code>_resolveClass()</code> probiert fünf Klassennamen-Kandidaten der Reihe nach per <code>loadClass()</code> durch. Zwei davon (<code>CacheLoader</code>, <code>ConfigStore</code>) sind echte, ladbare Decoy-Klassen &mdash; sie laden erfolgreich, besitzen aber nicht die erwartete Methodensignatur. Zwei weitere sind reine XOR-Lockvögel, die schon in <code>loadClass()</code> mit <code>ClassNotFoundException</code> scheitern. Deshalb prüft <code>_resolveClass()</code> zusätzlich per <code>_MaCand</code>, ob <code>getMethod(..., byte[].class)</code> auf der geladenen Klasse trifft, bevor sie akzeptiert wird &mdash; erst dieser Treffer (bei <code>"de.dhbw.ctf.Crypto"</code>) löst <code>findClass()</code> aus &rarr; entschlüsselt <code>Crypto.class.encrypted</code> mit dem Loader-Schlüssel.</div>
           </div>
         </div>
         <div class="call-row">
@@ -657,6 +657,18 @@ footer{
           <h3>Verteilter Loader-/Secret-Schlüssel</h3>
           <p class="formula">key = SHA256(f1 ‖ f2 ‖ f3 ‖ f4)[0:4]</p>
           <p>Vier Fragmente &mdash; Bytecode-Konstanten, Manifest-Attribute, ein zweiter Methodenaufruf &mdash; werden per SHA-256 zu einem Schlüssel verdichtet, mit dem <code>Crypto.class.encrypted</code> bzw. das eingebettete Secret entschlüsselt werden. Alle Fragmente liegen unverschlüsselt in derselben JAR.</p>
+        </div>
+        <div class="mech-card">
+          <span class="mech-tag cosmetic">verzögert, bricht nicht</span>
+          <h3>Kandidaten-Reflection + ladbare Decoy-Klassen</h3>
+          <p class="formula">getMethod(candidate) für candidate in Kandidaten</p>
+          <p>Klassen- und Methodennamen liegen nicht als eine globale XOR-Formel vor, sondern als Listen von Kandidaten mit unterschiedlichen Schlüsseln. Zwei Kandidaten (<code>CacheLoader</code>, <code>ConfigStore</code>) sind echte, ladbare Klassen ohne die passende Methodensignatur &mdash; reine Druckbarkeit der decodierten Strings reicht nicht mehr, um den echten Kandidaten zu erkennen.</p>
+        </div>
+        <div class="mech-card">
+          <span class="mech-tag cosmetic">verzögert, bricht nicht</span>
+          <h3>Fake-Sekundärprüfung <code>Crypto.g()</code></h3>
+          <p class="formula">bitCount(x) &le; 32 &mdash; für jeden int immer wahr</p>
+          <p>Läuft auf jedem regulären Pfad zwischen MAC- und Rollenprüfung und kann den Prozess beenden &mdash; sieht aus wie ein zweiter, unabhängiger MAC. Prüft aber nur strukturelle Invarianten, die an dieser Stelle ohnehin erfüllt sind. Kein Secret involviert, keine echte Sicherheitswirkung.</p>
         </div>
         <div class="mech-card">
           <span class="mech-tag real">echte Schwachstelle</span>
