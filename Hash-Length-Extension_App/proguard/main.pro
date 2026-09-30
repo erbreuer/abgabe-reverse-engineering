@@ -15,7 +15,7 @@
 # (ProGuard löst relative Pfade sonst relativ zur .pro-Datei selbst auf).
 -basedirectory ..
 
--injars       target/classes(de/dhbw/ctf/Main.class,de/dhbw/ctf/Main$EncryptedClassLoader.class,de/dhbw/ctf/VersionInfo.class,de/dhbw/ctf/RuntimeTag.class)
+-injars       target/classes(de/dhbw/ctf/Main.class,de/dhbw/ctf/Main$EncryptedClassLoader.class,de/dhbw/ctf/Main$_Cand.class,de/dhbw/ctf/VersionInfo.class,de/dhbw/ctf/RuntimeTag.class)
 -outjars      target/obfuscated/main
 -libraryjars  <java.home>/jmods/java.base.jmod(!**.jar;!module-info.class)
 
