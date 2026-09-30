@@ -187,6 +187,7 @@ echo "[6/8] Cleaning up unobfuscated Main/VersionInfo class files..."
 # (Schritt 4/8) sie bis hierhin noch als Library brauchte.
 rm -f "$BUILD/de/dhbw/ctf/Main.class" \
       "$BUILD/de/dhbw/ctf/Main\$EncryptedClassLoader.class" \
+      "$BUILD/de/dhbw/ctf/Main\$_Cand.class" \
       "$BUILD/de/dhbw/ctf/VersionInfo.class" \
       "$BUILD/de/dhbw/ctf/RuntimeTag.class"
 
