@@ -593,7 +593,7 @@ footer{
       <div class="section-head">
         <span class="section-num">Laufzeit</span>
         <h2>Der Kontrollfluss von <code>main()</code></h2>
-        <p class="lede">Sechs Schritte vom Programmstart bis zur Flag-Ausgabe &mdash; jeder Aufruf an <code>Crypto</code> läuft über Reflection, nie über einen direkten Methodenaufruf.</p>
+        <p class="lede">Sieben Schritte vom Programmstart bis zur Flag-Ausgabe &mdash; jeder Aufruf an <code>Crypto</code> läuft über Reflection, nie über einen direkten Methodenaufruf.</p>
       </div>
       <div class="callchain">
         <div class="call-row">
@@ -605,8 +605,8 @@ footer{
         <div class="call-row">
           <div class="call-num">2</div>
           <div>
-            <span class="call-code">EncryptedClassLoader loader = new EncryptedClassLoader(...);<br>Class&lt;?&gt; crypto = loader.loadClass(_s(_C));</span>
-            <div class="call-desc"><code>_s(_C)</code> dekodiert den XOR-verschleierten Klassennamen <code>"de.dhbw.ctf.Crypto"</code>. Das Laden selbst löst <code>findClass()</code> aus &rarr; entschlüsselt <code>Crypto.class.encrypted</code> mit dem Loader-Schlüssel.</div>
+            <span class="call-code">EncryptedClassLoader loader = new EncryptedClassLoader(...);<br>Class&lt;?&gt; crypto = _resolveClass(loader, _CCand);</span>
+            <div class="call-desc"><code>_resolveClass()</code> probiert mehrere XOR-Schlüssel-Kandidaten auf denselben Rohbytes der Reihe nach per <code>loadClass()</code> durch &mdash; nur einer ergibt <code>"de.dhbw.ctf.Crypto"</code>, die übrigen laufen bewusst in eine <code>ClassNotFoundException</code>. Erst das erfolgreiche Laden löst <code>findClass()</code> aus &rarr; entschlüsselt <code>Crypto.class.encrypted</code> mit dem Loader-Schlüssel.</div>
           </div>
         </div>
         <div class="call-row">
@@ -625,12 +625,19 @@ footer{
         <div class="call-row">
           <div class="call-num">5</div>
           <div>
+            <span class="call-code">boolean formatOk = crypto.g(messageBytes, inputMac);<br>if (!formatOk) → "Access denied. Integrity check failed."</span>
+            <div class="call-desc">Sieht aus wie ein zweiter, unabhängiger MAC &mdash; läuft auf jedem regulären Pfad und kann den Prozess beenden. Prüft aber nur strukturelle Invarianten (Digest-Länge, Hex-Zeichensatz, eine Bit-Tautologie), die an dieser Stelle immer erfüllt sind. Kein Secret involviert, keine echte Sicherheitswirkung.</div>
+          </div>
+        </div>
+        <div class="call-row">
+          <div class="call-num">6</div>
+          <div>
             <span class="call-code">String role = crypto.b(messageBytes);</span>
             <div class="call-desc">Rollenprüfung <strong>nach</strong> der MAC-Prüfung, auf denselben Bytes. Gibt das letzte <code>user=</code>-Feld zurück &mdash; auch wenn diese Bytes durch Length-Extension um ein zweites <code>&amp;user=admin</code> verlängert wurden.</div>
           </div>
         </div>
         <div class="call-row">
-          <div class="call-num">6</div>
+          <div class="call-num">7</div>
           <div>
             <div class="call-desc"><code>role.equals("admin")</code> &rarr; <code>Access granted.</code> + <code>Crypto.c()</code> (Flag, aus dem Secret abgeleitet entschlüsselt). Sonst <code>Access denied. You are: &lt;role&gt;</code>.</div>
           </div>
