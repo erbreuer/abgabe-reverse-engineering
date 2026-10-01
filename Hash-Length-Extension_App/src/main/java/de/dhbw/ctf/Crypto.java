@@ -15,8 +15,7 @@ import java.nio.charset.StandardCharsets;
 // ist, legt der Hash-Output den kompletten internen Zustand offen — wer
 // SHA256(secret||message) und die Bytelänge von secret||message kennt,
 // kann den Hash für secret||message||padding||beliebiges_suffix
-// weiterrechnen, ohne secret zu kennen (Hash-Length-Extension). Siehe
-// LOESUNG.md für den vollständigen Angriff.
+// weiterrechnen, ohne secret zu kennen (Hash-Length-Extension).
 public class Crypto {
 
     // Flag, verschlüsselt mit einem aus SHA-256(secret || _FREF) abgeleiteten
