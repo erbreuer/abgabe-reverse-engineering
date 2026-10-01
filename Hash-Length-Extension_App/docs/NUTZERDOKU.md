@@ -29,7 +29,7 @@ Hilfe `java -jar vault.jar --help` ausgegeben:
 
 
 
-## Angriff
+## Verhalten
 
 Je nach Eingabe antwortet die Anwendung mit einer von drei Meldungen:
 

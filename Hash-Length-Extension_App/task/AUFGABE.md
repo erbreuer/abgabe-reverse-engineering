@@ -4,7 +4,7 @@
 
 - `vault.jar` — eine ausführbare Java-Anwendung
 
-## Was die Anwendung tut
+## Was die Anwendung macht
 
 VaultAccess ist ein Token-Validator. Du übergibst eine Nachricht und einen MAC
 (Message Authentication Code). Die Anwendung prüft ob der MAC gültig ist.
@@ -28,7 +28,7 @@ FLAG{...}
 ```
 
 Du hast keinen Admin-Token. Deine Aufgabe ist es, einen gültigen Admin-Token zu
-erzeugen — **ohne das interne Secret der Anwendung zu kennen**.
+erzeugen, **ohne das interne Secret der Anwendung zu kennen**.
 
 Einen Token mit `--sample` zu beziehen und direkt zu modifizieren wird nicht
 funktionieren, da der MAC dann ungültig ist.
@@ -36,5 +36,4 @@ funktionieren, da der MAC dann ungültig ist.
 ## Hinweis
 
 Analysiere die Anwendung. Der MAC-Algorithmus hat eine Schwachstelle, die es
-erlaubt einen gültigen Token zu fälschen — ohne Brute-Force und ohne das Secret.
-Die Secret-Länge ist aus dem JAR ermittelbar.
+erlaubt einen gültigen Token zu fälschen, ohne Brute-Force und ohne das Secret.

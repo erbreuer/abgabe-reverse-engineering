@@ -10,7 +10,7 @@ gibt bei der Rolle `admin` ein Flag aus.
 
 | Tool | Version |
 |---|---|
-| JDK | 21+ (Zielplattform: Ubuntu Linux 26.04 x86-64), getestet mit JDK 26 |
+| JDK | 21+ (Zielplattform: Ubuntu Linux 24.04 x86-64), getestet mit JDK 26 |
 | Python 3 | 3.8+ (nur für Build-Script) |
 | ProGuard | 7.9+ (Java-26-Class-Dateien werden erst ab dieser Version unterstützt) |
 
@@ -22,11 +22,12 @@ gibt bei der Rolle `admin` ein Flag aus.
 
 Erzeugt `target/vault.jar`.
 
+Das Secret und die Flag werden erst zur Build-Zeit in `Crypto.java` eingebettet, XOR-verschlüsselt und anschließend wird `Crypto.class` nochmals verschlüsselt ins JAR gepackt.
+
 ## Verwendung
 
 Die Anwendung erwartet die Nachricht als **Hex-String** (kein Klartext). Das
-Secret ist fest in der JAR eingebettet (verteilt über mehrere Fragmente) — es
-muss **keine** Umgebungsvariable gesetzt werden.
+Secret ist fest in der JAR eingebettet (verteilt über mehrere Fragmente).
 
 ```
 java -jar target/vault.jar <message-hex> <mac>
@@ -73,10 +74,13 @@ Hash-Length-Extension_App/
 ├── proguard/
 │   ├── crypto.pro         # ProGuard-Config für Crypto.class
 │   └── main.pro           # ProGuard-Config für Main.class + EncryptedClassLoader
+├── task/
+│   ├── vault.jar          # Fertig gebautes JAR für den Löser
+│   └── AUFGABE.md         # Aufgabenstellung für Studierenden
+├── docs/
+│   ├── DOKU.md            # RE-Dokumentation (Schwachstelle + Lösungsweg)
+│   ├── KI-EINSCHAETZUNG.md  # KI-Einschätzung zur RE-Erschwerung
+│   └── NUTZERDOKU.md      # Nutzerdokumentation (was die Anwendung macht)
 ├── build.sh               # Build-Script (javac → ProGuard → Hash-Key-Verschlüsselung → jar)
-├── AUFGABE.md             # Aufgabenstellung für den Löser
-├── NUTZERDOKU.md          # Nutzerdokumentation (was die Anwendung tut)
-├── README.md              # Diese Datei (Build + Betrieb)
-├── DOKU.md                # RE-Dokumentation (Schwachstelle + Lösungsweg)
-└── KI-EINSCHAETZUNG.md    # KI-Einschätzung zur RE-Erschwerung
+└── README.md              # Diese Datei (Build + Betrieb)
 ```

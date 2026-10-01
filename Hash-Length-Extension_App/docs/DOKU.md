@@ -19,8 +19,7 @@ und beliebige Bytes anhängen, ohne das Secret zu kennen.
 
 **Voraussetzungen für den Angriff:**
 
-1. `--sample` liefert eine gültige Nachricht (`user=guest`) **mitsamt gültigem
-   MAC** - das dient als Ausgangspunkt beim Angriff.
+1. `--sample` liefert eine gültige Nachricht (`user=guest`) mitsamt gültigem MAC - das dient als Ausgangspunkt beim Angriff.
 2. Die Rollenprüfung (`Crypto.b()`) nimmt bei mehreren `user=`-Feldern das
    **letzte**. Hängt man `&user=admin` an, wird `user=guest` dadurch überschrieben.
 
@@ -29,7 +28,7 @@ Schlüssel, Decoy-Klassen, mehrere XOR-Kandidaten pro Methodennamen, eine
 zusätzliche "Integritätsprüfung") erschwert das Lesen des Codes, nicht aber
 den Angriff selbst. Die scheinbare zweite Prüfung `Crypto.g()` läuft zwar
 nach der MAC-Prüfung, vergleicht aber nur Länge/Zeichensatz des MAC gegen
-sich selbst und niemals gegen das Secret — sie kann für jede Eingabe, die
+sich selbst und niemals gegen das Secret. Sie kann für jede Eingabe, die
 die MAC-Prüfung bereits bestanden hat, nie fehlschlagen.
 
 ## Wie kann man dies reversen?
@@ -50,12 +49,13 @@ Dafür sind drei Dinge nötig:
 
 ## Verwendete Skripte / Tools
 
-- **JDK 21+** — `jar` zum Entpacken des JAR, `javap` zum Lesen des Bytecodes
-- **Python 3** — für die beiden Skripte (Entschlüsseln der
+- **JDK 21+** - `jar` zum Entpacken des JAR, `javap` zum Lesen des Bytecodes
+- **Python 3** - für die beiden Skripte (Entschlüsseln der
   Klasse, Length-Extension-Angriff). Standardbibliothek (`hashlib`,
   `struct`)
-- optional ein Decompiler (**CFR** oder **jadx**) für lesbareren Java-Code
+- Ein Decompiler für lesbareren Java-Code
   anstelle des reinen `javap`-Bytecodes
+- Genaue Skripte: siehe Anleitung
 
 ## Anleitung — notwendige Schritte
 
@@ -84,14 +84,13 @@ Klassenname und alle Methodennamen, die dabei per `getMethod(...)`
 aufgelöst werden, stehen nicht im Klartext im Bytecode, sondern als
 XOR-kodierte Byte-Arrays mit mehreren Kandidaten-Schlüsseln pro Name
 (`javap` zeigt für den Klassennamen z.B. drei Versuche mit den Schlüsseln
-`0x71`, `0x27` und `0x5A`/`0x3C` auf denselben bzw. verschiedenen Rohbytes).
-Zwei der Klassen-Kandidaten (Schlüssel `0x27`) decodieren zu echten,
-ladbaren Klassen im JAR (`CacheLoader`, `ConfigStore`) — sie besitzen aber
+`0x71`, `0x27` und `0x5A`/`0x3C` auf denselben bzw. verschiedenen Rohbytes).<div>Zwei der Klassen-Kandidaten (Schlüssel `0x27`) decodieren zu echten,
+ladbaren Klassen im JAR (`CacheLoader`, `ConfigStore`). Allerdings besitzen sie
 nicht die Methode `a(byte[])`, mit der die Anwendung prüft, ob sie die
 richtige Klasse geladen hat. Nur der Kandidat mit Schlüssel `0x5A` ergibt
 `de.dhbw.ctf.Crypto` und liefert eine Klasse, auf der alle erwarteten
 Methoden existieren. Diese Kandidatenliste muss man einmal durchgehen, um
-zu wissen, welche Klasse tatsächlich geladen wird — am Angriff selbst
+zu wissen, welche Klasse tatsächlich geladen wird - am Angriff selbst
 ändert das nichts.
 
 Die Logik steckt in `de/dhbw/ctf/Crypto.class.encrypted`. Diese Datei wird zur
@@ -127,8 +126,9 @@ print("magic:", data[:4].hex())   # cafebabe = gültige .class-Datei
 ```
 
 Gibt es `cafebabe` aus, hat die Entschlüsselung funktioniert. 
-<br>Als nächstes den Bytecode
-lesen:
+
+<br>**Als nächstes den Bytecode
+lesen:**
 
     javap -p -c -classpath . de.dhbw.ctf.Crypto
 
@@ -138,18 +138,18 @@ Im statischen Initialisierer wird das Secret-Array angelegt, direkt vor
     bipush  36
     newarray byte
 
-Das Secret ist also **36 Bytes** lang. (Es wird nur die Länge gebraucht, nicht der
-Inhalt.)
+Das Secret ist also **36 Bytes** lang (Es wird nur die Länge gebraucht, nicht der
+Inhalt).
 
 Das Secret selbst wird ebenfalls erst zur Laufzeit XOR-entschlüsselt, mit
 einem weiteren SHA-256-abgeleiteten Schlüssel aus vier Fragmenten (Konstante
 `111`, Manifest-Attribut `X-Secret-Tag = 52`, der bereits oben berechnete
 Loader-Schlüssel sowie `RuntimeTag.TRACE_TAG = 88`). Für den eigentlichen
-Length-Extension-Angriff ist das irrelevant — die Secret-**Länge** reicht,
-das Secret selbst muss nie entschlüsselt werden. (Wer es trotzdem
-entschlüsselt, etwa um Weg B in `KI-EINSCHAETZUNG.md` nachzuvollziehen,
-kann denselben Schlüssel wie beim Loader per `_deriveKey(111, 52,
-loader_key, 88)` nachrechnen und auf das Byte-Array XOR-verknüpfen.)
+Length-Extension-Angriff ist das irrelevant: die Secret-Länge reicht,
+das Secret selbst muss nie entschlüsselt werden. Möchte man es trotzdem
+entschlüsseln, (siehe Weg B in `KI-EINSCHAETZUNG.md`)
+dann kann man denselben Schlüssel wie beim Loader per `_deriveKey(111, 52,
+loader_key, 88)` nachrechnen und auf das Byte-Array XOR-verknüpfen.
 
 ### Schritt 3 — Admin-Token fälschen
 
@@ -239,7 +239,7 @@ Die MAC-Prüfung akzeptiert die verlängerte Nachricht, weil der MAC korrekt
 weitergerechnet wurde. Danach läuft noch `Crypto.g()` (Integritätsprüfung),
 die aber nur Länge und Hex-Zeichensatz des eingereichten MAC gegen sich
 selbst prüft und für jeden bereits akzeptierten MAC automatisch `true`
-liefert — sie greift hier nicht ein. Erst danach nimmt die Rollenprüfung das
+liefert (sie greift hier nicht ein). Erst danach nimmt die Rollenprüfung das
 letzte `user=`-Feld (`admin`) und gibt das Flag frei.
 
 
