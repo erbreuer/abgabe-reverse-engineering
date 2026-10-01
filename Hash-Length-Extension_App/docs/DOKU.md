@@ -11,7 +11,7 @@ Die Anwendung berechnet den MAC einer Nachricht als
     MAC = SHA256(secret || message)
 
 also indem sie ein geheimes Secret **vor** die Nachricht hängt und davon den
-SHA-256-Hash bildet (siehe `Crypto.a()` in Crypto.java). Das ist unsicher, weil sich dieser MAC durch einen Hash-Length-Extension-Angriff ohne Kenntnis des Secrets erweitern lässt.
+SHA-256-Hash bildet (siehe `Crypto.a()` in Crypto.java). Das ist unsicher, weil sich dieser MAC durch einen **Hash-Length-Extension-Angriff** ohne Kenntnis des Secrets erweitern lässt.
 
 SHA-256 verarbeitet die Eingabe blockweise. Der ausgegebene Hash enthält dabei den internen Zustand nach der bisherigen Eingabe. Wer einen gültigen Hash und die
 Länge der gehashten Daten kennt, kann den Hash einfach **weiterrechnen**
