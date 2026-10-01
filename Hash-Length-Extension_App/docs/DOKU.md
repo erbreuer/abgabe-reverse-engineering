@@ -25,7 +25,12 @@ und beliebige Bytes anhängen, ohne das Secret zu kennen.
    **letzte**. Hängt man `&user=admin` an, wird `user=guest` dadurch überschrieben.
 
 Die Verschleierung (verschlüsselte Klasse, ProGuard-Umbenennung, verteilter
-Schlüssel, Decoy-Klassen) erschwert das Lesen des Codes, nicht aber den Angriff selbst.
+Schlüssel, Decoy-Klassen, mehrere XOR-Kandidaten pro Methodennamen, eine
+zusätzliche "Integritätsprüfung") erschwert das Lesen des Codes, nicht aber
+den Angriff selbst. Die scheinbare zweite Prüfung `Crypto.g()` läuft zwar
+nach der MAC-Prüfung, vergleicht aber nur Länge/Zeichensatz des MAC gegen
+sich selbst und niemals gegen das Secret — sie kann für jede Eingabe, die
+die MAC-Prüfung bereits bestanden hat, nie fehlschlagen.
 
 ## Wie kann man dies reversen?
 
@@ -73,6 +78,22 @@ JAR entpacken:
 
     jar xf vault.jar
 
+`Main.class` lädt die eigentliche Logik nicht per normalem Import, sondern
+reflektiv über einen eigenen `ClassLoader` (`Main$a` im entpackten JAR). Der
+Klassenname und alle Methodennamen, die dabei per `getMethod(...)`
+aufgelöst werden, stehen nicht im Klartext im Bytecode, sondern als
+XOR-kodierte Byte-Arrays mit mehreren Kandidaten-Schlüsseln pro Name
+(`javap` zeigt für den Klassennamen z.B. drei Versuche mit den Schlüsseln
+`0x71`, `0x27` und `0x5A`/`0x3C` auf denselben bzw. verschiedenen Rohbytes).
+Zwei der Klassen-Kandidaten (Schlüssel `0x27`) decodieren zu echten,
+ladbaren Klassen im JAR (`CacheLoader`, `ConfigStore`) — sie besitzen aber
+nicht die Methode `a(byte[])`, mit der die Anwendung prüft, ob sie die
+richtige Klasse geladen hat. Nur der Kandidat mit Schlüssel `0x5A` ergibt
+`de.dhbw.ctf.Crypto` und liefert eine Klasse, auf der alle erwarteten
+Methoden existieren. Diese Kandidatenliste muss man einmal durchgehen, um
+zu wissen, welche Klasse tatsächlich geladen wird — am Angriff selbst
+ändert das nichts.
+
 Die Logik steckt in `de/dhbw/ctf/Crypto.class.encrypted`. Diese Datei wird zur
 Laufzeit entschlüsselt: <br>Die Anwendung kehrt die Bytefolge um und XORt jedes
 Byte mit einem Schlüssel. Der Schlüssel entsteht per SHA-256 aus vier Werten,
@@ -119,6 +140,16 @@ Im statischen Initialisierer wird das Secret-Array angelegt, direkt vor
 
 Das Secret ist also **36 Bytes** lang. (Es wird nur die Länge gebraucht, nicht der
 Inhalt.)
+
+Das Secret selbst wird ebenfalls erst zur Laufzeit XOR-entschlüsselt, mit
+einem weiteren SHA-256-abgeleiteten Schlüssel aus vier Fragmenten (Konstante
+`111`, Manifest-Attribut `X-Secret-Tag = 52`, der bereits oben berechnete
+Loader-Schlüssel sowie `RuntimeTag.TRACE_TAG = 88`). Für den eigentlichen
+Length-Extension-Angriff ist das irrelevant — die Secret-**Länge** reicht,
+das Secret selbst muss nie entschlüsselt werden. (Wer es trotzdem
+entschlüsselt, etwa um Weg B in `KI-EINSCHAETZUNG.md` nachzuvollziehen,
+kann denselben Schlüssel wie beim Loader per `_deriveKey(111, 52,
+loader_key, 88)` nachrechnen und auf das Byte-Array XOR-verknüpfen.)
 
 ### Schritt 3 — Admin-Token fälschen
 
@@ -205,10 +236,18 @@ Nachricht und MAC an die Anwendung übergeben:
     FLAG{h4sh_l3ngth_3xt3ns10n_pwn3d}
 
 Die MAC-Prüfung akzeptiert die verlängerte Nachricht, weil der MAC korrekt
-weitergerechnet wurde. Die Rollenprüfung nimmt das letzte `user=`-Feld (`admin`)
-und gibt das Flag frei.
+weitergerechnet wurde. Danach läuft noch `Crypto.g()` (Integritätsprüfung),
+die aber nur Länge und Hex-Zeichensatz des eingereichten MAC gegen sich
+selbst prüft und für jeden bereits akzeptierten MAC automatisch `true`
+liefert — sie greift hier nicht ein. Erst danach nimmt die Rollenprüfung das
+letzte `user=`-Feld (`admin`) und gibt das Flag frei.
 
 
 ### Wie man diesen Angriff verhindern könnte:
 Die richtige Gegenmaßnahme wäre **HMAC-SHA256** statt
 `SHA256(secret || message)`, damit wäre die Hash-Length-Extension nicht möglich.
+Die zusätzliche Prüfung `Crypto.g()` ist dafür kein Ersatz: Sie prüft nur
+Form (Länge, Hex-Zeichensatz) des bereits akzeptierten MAC, nie seinen Inhalt
+gegen das Secret, und wäre selbst mit einer echten Prüfung gegen eine
+Length-Extension wirkungslos, solange die eigentliche MAC-Berechnung
+weiterhin `SHA256(secret || message)` ist.

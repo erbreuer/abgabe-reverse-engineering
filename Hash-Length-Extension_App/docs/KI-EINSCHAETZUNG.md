@@ -28,14 +28,24 @@ nur auf die erste.
 über vier Fundstellen verteilte und per SHA-256 kombinierte Loader-Schlüssel
 sowie die Decoy-Klassen und XOR-kodierten Namen zwingen die KI, den Loader
 Schritt für Schritt nachzubauen, bevor sie die Klasse überhaupt entschlüsseln
-kann.
+kann. Für Methoden- und Klassennamen liegen mehrere XOR-Kandidaten vor, von
+denen nur einer den echten Namen ergibt; zwei der Klassen-Kandidaten laden
+sogar erfolgreich (`CacheLoader`, `ConfigStore`), scheitern aber am
+fehlenden `a(byte[])`. Die KI muss also die komplette Auflösungskette
+inklusive Signaturprüfung nachvollziehen, um den tatsächlich geladenen
+Kandidaten zu identifizieren. Das Secret selbst ist aus vier Fragmenten
+hash-abgeleitet, von denen eines (der Loader-Schlüssel) kein eigenständiges
+Compile-Zeit-Literal ist, sondern selbst erst berechnet werden muss — Main
+und Crypto lassen sich dadurch nicht unabhängig voneinander lösen.
 
 **Bremst kaum:** Sobald `Crypto.class` entschlüsselt ist, ist das Muster
 `SHA256(secret || message)` sofort als Hash-Length-Extension erkennbar. Die
 öffentlichen `Crypto`-Methoden müssen namensgleich bleiben (Reflection-Aufruf
 aus `Main`), die „Integritätsprüfung" `g()` prüft nie den Inhalt gegen das
-Secret, und der tote Code dient nur der Ablenkung — all das durchschaut eine KI,
-die den Code liest, schnell.
+Secret, sondern nur Länge und Hex-Zeichensatz des bereits akzeptierten MAC
+gegen sich selbst (ein `bitCount(...) > 32`-Check auf einem `int` ist zudem
+eine Tautologie, die nie zuschlägt), und der tote Code dient nur der
+Ablenkung — all das durchschaut eine KI, die den Code liest, schnell.
 
 ## Der entscheidende Befund: ein Shortcut umgeht die Schwachstelle
 
@@ -53,8 +63,9 @@ gibt es zwei Wege, die beide zum Flag führen:
 Weg B umgeht also das eigentliche didaktische Ziel. Entscheidend ist aber: Er
 ist **nicht wirklich schneller**. Beide Wege teilen sich den aufwändigsten Teil
 — die Analysephase bis zur entschlüsselten Klasse. Weg B spart danach zwar den
-Krypto-Teil, muss dafür aber das Secret aus mehreren verteilten Fragmenten
-korrekt zusammensetzen. Der Umweg existiert, kostet aber ähnlich viel Zeit wie
+Krypto-Teil, muss dafür aber das Secret aus vier verteilten Fragmenten korrekt
+zusammensetzen, von denen eines der bereits für den Loader berechnete
+Schlüssel selbst ist. Der Umweg existiert, kostet aber ähnlich viel Zeit wie
 der beabsichtigte Angriff.
 
 ## Fazit
