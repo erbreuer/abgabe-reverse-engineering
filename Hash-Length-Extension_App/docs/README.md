@@ -25,9 +25,8 @@ Erzeugt `target/vault.jar`.
 ## Verwendung
 
 Die Anwendung erwartet die Nachricht als **Hex-String** (kein Klartext). Das
-Secret ist fest in der JAR eingebettet (verteilt über mehrere Fragmente,
-siehe [LOESUNG.md](LOESUNG.md)) — es muss **keine** Umgebungsvariable mehr
-gesetzt werden.
+Secret ist fest in der JAR eingebettet (verteilt über mehrere Fragmente) — es
+muss **keine** Umgebungsvariable gesetzt werden.
 
 ```
 java -jar target/vault.jar <message-hex> <mac>
@@ -68,13 +67,16 @@ Hash-Length-Extension_App/
 │   ├── Main.java          # Einstiegspunkt + EncryptedClassLoader
 │   ├── Crypto.java        # MAC-Logik + eingebettetes Secret (wird verschlüsselt ins JAR gepackt)
 │   ├── VersionInfo.java   # Schlüsselfragment des Loaders
-│   └── RuntimeTag.java    # Weitere Schlüsselfragmente (Loader + Secret)
+│   ├── RuntimeTag.java    # Weitere Schlüsselfragmente (Loader + Secret)
+│   ├── CacheLoader.java   # Decoy-Klasse
+│   └── ConfigStore.java   # Decoy-Klasse
 ├── proguard/
 │   ├── crypto.pro         # ProGuard-Config für Crypto.class
 │   └── main.pro           # ProGuard-Config für Main.class + EncryptedClassLoader
 ├── build.sh               # Build-Script (javac → ProGuard → Hash-Key-Verschlüsselung → jar)
-├── AUFGABE.md             # Aufgabenstellung für Schüler
-├── README.md              # Diese Datei (Nutzerdokumentation)
-├── LOESUNG.md             # RE-Dokumentation (Schwachstelle + Lösungsweg)
+├── AUFGABE.md             # Aufgabenstellung für den Löser
+├── NUTZERDOKU.md          # Nutzerdokumentation (was die Anwendung tut)
+├── README.md              # Diese Datei (Build + Betrieb)
+├── DOKU.md                # RE-Dokumentation (Schwachstelle + Lösungsweg)
 └── KI-EINSCHAETZUNG.md    # KI-Einschätzung zur RE-Erschwerung
 ```
