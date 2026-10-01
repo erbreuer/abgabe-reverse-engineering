@@ -26,6 +26,8 @@ Das Secret und die Flag werden erst zur Build-Zeit in `Crypto.java` eingebettet,
 
 ## Verwendung
 
+**Die Aufgabe zum Lösen, für die anderen Studierenden, befindet sich in /task**
+
 Die Anwendung erwartet die Nachricht als **Hex-String** (kein Klartext). Das
 Secret ist fest in der JAR eingebettet (verteilt über mehrere Fragmente).
 
